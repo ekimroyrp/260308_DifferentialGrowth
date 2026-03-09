@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>260308_DifferentialGrowth</title>
+    <style>
+      #ui-panel {
+        visibility: hidden;
+        opacity: 0;
+      }
+
+      html.ui-ready #ui-panel {
+        visibility: visible;
+        opacity: 1;
+      }
+    </style>
+  </head>
+  <body>
+    <svg id="brush-overlay" aria-hidden="true">
+      <circle id="brush-circle" />
+      <circle id="falloff-circle" />
+      <circle id="brush-dot" />
+    </svg>
+
+    <div id="ui-panel" class="apple-panel">
+      <div id="ui-handle" class="panel-drag-handle">
+        <button
+          type="button"
+          id="collapse-toggle"
+          class="collapse-button panel-collapse-toggle"
+          aria-label="Collapse controls"
+          aria-expanded="true"
+        >
+          <span class="collapse-icon">v</span>
+        </button>
+      </div>
+      <div class="ui-body panel-sections">
+        <div class="control-hint">Wheel = Zoom, MMB = Pan, RMB = Orbit, LMB = Paint Mask (Mask Mode)</div>
+
+        <section class="panel-section">
+          <div class="panel-section-header">
+            <span class="panel-section-label">Simulation</span>
+          </div>
+          <div class="panel-section-content panel-controls-stack">
+            <div class="control control-grid-3">
+              <button type="button" id="start-sim" class="pill-button control-button-wide">Start</button>
+              <button type="button" id="mask-mode" class="pill-button control-button-wide">Mask</button>
+              <button type="button" id="reset-sim" class="pill-button control-button-wide">Reset</button>
+            </div>
+
+            <label class="control">
+              <div class="control-row">
+                <span>Growth Speed</span>
+                <span id="growth-speed-value">1.00</span>
+              </div>
+              <input type="range" id="growth-speed" min="0.1" max="3" step="0.01" value="1" />
+            </label>
+
+            <label class="control">
+              <div class="control-row">
+                <span>Seed</span>
+                <span id="seed-value-label">351107</span>
+              </div>
+              <input type="range" id="seed-value" min="0" max="999999" step="1" value="351107" />
+            </label>
+          </div>
+        </section>
+
+        <section class="panel-section">
+          <div class="panel-section-header">
+            <span class="panel-section-label">Shape</span>
+          </div>
+          <div class="panel-section-content panel-controls-stack">
+            <label class="control">
+              <div class="control-row">
+                <span>Base Shape</span>
+              </div>
+              <select id="base-shape">
+                <option value="sphere">Sphere</option>
+                <option value="cube">Cube</option>
+                <option value="pyramid">Pyramid</option>
+                <option value="torus">Torus</option>
+                <option value="dodecahedron">Dodecahedron</option>
+              </select>
+            </label>
+
+            <label class="control">
+              <div class="control-row">
+                <span>Brush Radius</span>
+                <span id="brush-radius-value">0.12</span>
+              </div>
+              <input type="range" id="brush-radius" min="0.02" max="0.5" step="0.005" value="0.12" />
+            </label>
+
+            <label class="control">
+              <div class="control-row">
+                <span>Falloff Offset</span>
+                <span id="falloff-offset-value">0.08</span>
+              </div>
+              <input type="range" id="falloff-offset" min="0" max="0.5" step="0.005" value="0.08" />
+            </label>
+
+            <label class="control">
+              <div class="control-row">
+                <span>Blur Mask</span>
+                <span id="blur-mask-value">0.35</span>
+              </div>
+              <input type="range" id="blur-mask-strength" min="0" max="1" step="0.01" value="0.35" />
+            </label>
+
+            <div class="control control-grid-2">
+              <button type="button" id="blur-mask" class="pill-button control-button-wide">Blur Mask</button>
+              <button type="button" id="clear-mask" class="pill-button control-button-wide">Clear Mask</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel-section">
+          <div class="panel-section-header">
+            <span class="panel-section-label">Growth</span>
+          </div>
+          <div class="panel-section-content panel-controls-stack">
+            <label class="control">
+              <div class="control-row">
+                <span>Growth Step</span>
+                <span id="growth-step-value">0.45</span>
+              </div>
+              <input type="range" id="growth-step" min="0.1" max="2" step="0.01" value="0.45" />
+            </label>
+
+            <label class="control">
+              <div class="control-row">
+                <span>Target Edge Length</span>
+                <span id="target-edge-length-value">0.12</span>
+              </div>
+              <input type="range" id="target-edge-length" min="0.03" max="0.3" step="0.005" value="0.12" />
+            </label>
+
+            <label class="control">
+              <div class="control-row">
+                <span>Split Threshold</span>
+                <span id="split-threshold-value">1.60</span>
+              </div>
+              <input type="range" id="split-threshold" min="1.2" max="2.5" step="0.01" value="1.6" />
+            </label>
+
+            <label class="control">
+              <div class="control-row">
+                <span>Repulsion</span>
+                <span id="repulsion-value">0.45</span>
+              </div>
+              <input type="range" id="repulsion" min="0" max="1" step="0.01" value="0.45" />
+            </label>
+
+            <label class="control">
+              <div class="control-row">
+                <span>Smoothing</span>
+                <span id="smoothing-value">0.52</span>
+              </div>
+              <input type="range" id="smoothing" min="0" max="1" step="0.01" value="0.52" />
+            </label>
+
+            <label class="control">
+              <div class="control-row">
+                <span>Shape Retention</span>
+                <span id="shape-retention-value">0.09</span>
+              </div>
+              <input type="range" id="shape-retention" min="0" max="0.5" step="0.01" value="0.09" />
+            </label>
+
+            <label class="control">
+              <div class="control-row">
+                <span>Max Vertices</span>
+                <span id="max-vertices-value">50000</span>
+              </div>
+              <input type="range" id="max-vertices" min="10000" max="120000" step="1000" value="50000" />
+            </label>
+          </div>
+        </section>
+
+        <section class="panel-section">
+          <div class="panel-section-header">
+            <span class="panel-section-label">Materials</span>
+          </div>
+          <div class="panel-section-content panel-controls-stack">
+            <div class="control control-grid-2">
+              <label class="control compact">
+                <div class="control-row">
+                  <span>Gradient Start</span>
+                </div>
+                <input type="color" id="gradient-start-color" class="color-picker" value="#9fd8ff" />
+              </label>
+              <label class="control compact">
+                <div class="control-row">
+                  <span>Gradient End</span>
+                </div>
+                <input type="color" id="gradient-end-color" class="color-picker" value="#2e4fb4" />
+              </label>
+            </div>
+
+            <label class="control">
+              <div class="control-row">
+                <span>Curvature Contrast</span>
+                <span id="curvature-contrast-value">1.25</span>
+              </div>
+              <input type="range" id="curvature-contrast" min="0.2" max="3" step="0.01" value="1.25" />
+            </label>
+
+            <label class="control">
+              <div class="control-row">
+                <span>Curvature Bias</span>
+                <span id="curvature-bias-value">0.00</span>
+              </div>
+              <input type="range" id="curvature-bias" min="-1" max="1" step="0.01" value="0" />
+            </label>
+
+            <label class="control">
+              <div class="control-row">
+                <span>Fresnel</span>
+                <span id="fresnel-value">0.60</span>
+              </div>
+              <input type="range" id="fresnel" min="0" max="2" step="0.01" value="0.6" />
+            </label>
+
+            <label class="control">
+              <div class="control-row">
+                <span>Specular</span>
+                <span id="specular-value">0.60</span>
+              </div>
+              <input type="range" id="specular" min="0" max="2" step="0.01" value="0.6" />
+            </label>
+
+            <label class="control">
+              <div class="control-row">
+                <span>Bloom</span>
+                <span id="bloom-value">0.28</span>
+              </div>
+              <input type="range" id="bloom" min="0" max="2" step="0.01" value="0.28" />
+            </label>
+
+            <label class="control">
+              <div class="control-row">
+                <span>Exposure</span>
+                <span id="exposure-value">1.10</span>
+              </div>
+              <input type="range" id="exposure" min="0.5" max="2" step="0.01" value="1.1" />
+            </label>
+          </div>
+        </section>
+      </div>
+      <div id="ui-handle-bottom"></div>
+    </div>
+
+    <canvas id="app-canvas"></canvas>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
