@@ -4,6 +4,7 @@
 
 ## Features
 - Real-time differential growth simulation on triangle meshes
+- Adaptive edge splitting/remeshing with max-vertex cap enforcement
 - Base shape selection: `Cube`, `Sphere`, `Pyramid`, `Torus`, `Dodecahedron`
 - Draggable/collapsible UI panel with grouped settings:
   - `Simulation` (Start/Stop, Mask mode, Reset, Growth Speed, Seed)
@@ -12,7 +13,7 @@
   - `Materials` (gradient start/end colors, curvature and shading controls, bloom, exposure)
 - Mask painting mode:
   - `Mask` button pauses simulation and switches shader to grayscale mask preview
-  - Left-click paint applies black core with smooth falloff ring
+  - Left-click paint applies black core with smooth falloff ring (paused mask mode only)
   - `Start` resumes simulation and restores curvature-based shading
 - Postprocessing pipeline with bloom and FXAA
 

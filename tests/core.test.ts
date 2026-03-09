@@ -61,6 +61,46 @@ describe('DifferentialGrowthEngine mask operations', () => {
   });
 });
 
+describe('DifferentialGrowthEngine adaptive splitting', () => {
+  it('subdivides geometry when long edges exceed split threshold and under maxVertices', () => {
+    const geometry = buildShapeGeometry('sphere');
+    const initialCount = geometry.getAttribute('position').count;
+    const engine = new DifferentialGrowthEngine(
+      geometry,
+      {
+        ...growthSettings,
+        targetEdgeLength: 0.02,
+        splitThreshold: 1.2,
+        maxVertices: 100000,
+      },
+      12,
+    );
+
+    engine.step(0.016, 1);
+    const nextCount = engine.getGeometry().getAttribute('position').count;
+    expect(nextCount).toBeGreaterThan(initialCount);
+  });
+
+  it('does not subdivide when maxVertices cap is too low', () => {
+    const geometry = buildShapeGeometry('sphere');
+    const initialCount = geometry.getAttribute('position').count;
+    const engine = new DifferentialGrowthEngine(
+      geometry,
+      {
+        ...growthSettings,
+        targetEdgeLength: 0.02,
+        splitThreshold: 1.2,
+        maxVertices: initialCount + 10,
+      },
+      16,
+    );
+
+    engine.step(0.016, 1);
+    const nextCount = engine.getGeometry().getAttribute('position').count;
+    expect(nextCount).toBe(initialCount);
+  });
+});
+
 describe('MaterialController', () => {
   it('switches to mask view mode', () => {
     const controller = new MaterialController(materialSettings);

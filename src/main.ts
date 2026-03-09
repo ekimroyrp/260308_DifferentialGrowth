@@ -721,6 +721,12 @@ renderer.setAnimationLoop((now) => {
   controls.update();
   if (appState.running) {
     engine.step(dt, simulationSettings.growthSpeed);
+    const activeGeometry = engine.getGeometry();
+    if (mesh.geometry !== activeGeometry) {
+      const previous = mesh.geometry;
+      mesh.geometry = activeGeometry;
+      previous.dispose();
+    }
   }
 
   composer.render();

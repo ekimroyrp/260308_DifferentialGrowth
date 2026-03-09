@@ -1,4 +1,5 @@
-import { BufferAttribute, DynamicDrawUsage, type BufferGeometry, MathUtils, Vector3 } from 'three';
+import { BufferAttribute, BufferGeometry, DynamicDrawUsage, MathUtils, Vector3 } from 'three';
+import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { GrowthSettings } from '../types';
 import { buildTopology, type GeometryTopology } from './geometryTopology';
 import { SeededRng } from './seededRng';
@@ -15,9 +16,10 @@ export class DifferentialGrowthEngine {
   private curvatureAttr: BufferAttribute;
   private readonly settings: GrowthSettings;
   private basePositions: Float32Array;
-  private readonly curvatureWork: Float32Array;
-  private readonly deltaWork: Float32Array;
+  private curvatureWork: Float32Array;
+  private deltaWork: Float32Array;
   private rng: SeededRng;
+  private subdivisionCooldown: number;
 
   constructor(geometry: BufferGeometry, settings: GrowthSettings, seed: number) {
     this.geometry = geometry;
@@ -28,10 +30,15 @@ export class DifferentialGrowthEngine {
     this.curvatureAttr = new BufferAttribute(new Float32Array(this.positionAttr.count), 1);
     this.topology = { adjacency: [], edges: [] };
     this.basePositions = new Float32Array();
-    this.curvatureWork = new Float32Array(this.positionAttr.count);
-    this.deltaWork = new Float32Array(this.positionAttr.count * 3);
+    this.curvatureWork = new Float32Array();
+    this.deltaWork = new Float32Array();
     this.rng = new SeededRng(seed);
+    this.subdivisionCooldown = 0;
     this.setGeometry(geometry);
+  }
+
+  getGeometry(): BufferGeometry {
+    return this.geometry;
   }
 
   setGeometry(geometry: BufferGeometry): void {
@@ -51,8 +58,9 @@ export class DifferentialGrowthEngine {
 
     this.topology = buildTopology(this.geometry);
     this.basePositions = Float32Array.from(this.positionAttr.array as ArrayLike<number>);
-    this.curvatureWork.fill(0);
-    this.deltaWork.fill(0);
+    this.curvatureWork = new Float32Array(this.positionAttr.count);
+    this.deltaWork = new Float32Array(this.positionAttr.count * 3);
+    this.subdivisionCooldown = 0;
     this.updateCurvatureAttribute();
   }
 
@@ -162,6 +170,7 @@ export class DifferentialGrowthEngine {
     this.geometry.computeVertexNormals();
     this.normalAttr.needsUpdate = true;
     this.updateCurvatureAttribute();
+    this.maybeSplitLongEdges();
   }
 
   private integrate(dt: number): void {
@@ -299,6 +308,188 @@ export class DifferentialGrowthEngine {
       positionArray[i] += this.deltaWork[i];
     }
     this.positionAttr.needsUpdate = true;
+  }
+
+  private maybeSplitLongEdges(): void {
+    if (this.subdivisionCooldown > 0) {
+      this.subdivisionCooldown -= 1;
+      return;
+    }
+
+    const vertexCount = this.positionAttr.count;
+    if (vertexCount >= this.settings.maxVertices) {
+      return;
+    }
+
+    // Full split pass can roughly quadruple vertices before merge.
+    if (vertexCount * 4 > this.settings.maxVertices) {
+      return;
+    }
+
+    const splitLength = this.settings.targetEdgeLength * this.settings.splitThreshold;
+    if (splitLength <= 0) {
+      return;
+    }
+
+    const positionArray = this.positionAttr.array as Float32Array;
+    let longestEdge = 0;
+    for (let i = 0; i < this.topology.edges.length; i += 1) {
+      const [a, b] = this.topology.edges[i];
+      const ai = a * 3;
+      const bi = b * 3;
+      const dx = positionArray[ai] - positionArray[bi];
+      const dy = positionArray[ai + 1] - positionArray[bi + 1];
+      const dz = positionArray[ai + 2] - positionArray[bi + 2];
+      const length = Math.sqrt(dx * dx + dy * dy + dz * dz);
+      if (length > longestEdge) {
+        longestEdge = length;
+      }
+    }
+
+    if (longestEdge <= splitLength) {
+      return;
+    }
+
+    this.subdivideGeometryOnce();
+    this.subdivisionCooldown = 8;
+  }
+
+  private subdivideGeometryOnce(): void {
+    const sourceClone = this.geometry.clone();
+    sourceClone.setAttribute('aBasePos', new BufferAttribute(Float32Array.from(this.basePositions), 3));
+    const source = sourceClone.index ? sourceClone.toNonIndexed() : sourceClone;
+
+    const srcPos = source.getAttribute('position') as BufferAttribute;
+    const srcMask = source.getAttribute('aMask') as BufferAttribute;
+    const srcBase = source.getAttribute('aBasePos') as BufferAttribute;
+    const triCount = Math.floor(srcPos.count / 3);
+    const nextVertexCount = triCount * 12;
+
+    const nextPos = new Float32Array(nextVertexCount * 3);
+    const nextMask = new Float32Array(nextVertexCount);
+    const nextBase = new Float32Array(nextVertexCount * 3);
+
+    let writeVertex = 0;
+
+    const write = (
+      px: number,
+      py: number,
+      pz: number,
+      mask: number,
+      bx: number,
+      by: number,
+      bz: number,
+    ): void => {
+      const pIndex = writeVertex * 3;
+      nextPos[pIndex] = px;
+      nextPos[pIndex + 1] = py;
+      nextPos[pIndex + 2] = pz;
+      nextMask[writeVertex] = mask;
+      nextBase[pIndex] = bx;
+      nextBase[pIndex + 1] = by;
+      nextBase[pIndex + 2] = bz;
+      writeVertex += 1;
+    };
+
+    for (let tri = 0; tri < triCount; tri += 1) {
+      const i0 = tri * 3;
+      const i1 = i0 + 1;
+      const i2 = i0 + 2;
+
+      const p0x = srcPos.getX(i0);
+      const p0y = srcPos.getY(i0);
+      const p0z = srcPos.getZ(i0);
+      const p1x = srcPos.getX(i1);
+      const p1y = srcPos.getY(i1);
+      const p1z = srcPos.getZ(i1);
+      const p2x = srcPos.getX(i2);
+      const p2y = srcPos.getY(i2);
+      const p2z = srcPos.getZ(i2);
+
+      const m0 = srcMask.getX(i0);
+      const m1 = srcMask.getX(i1);
+      const m2 = srcMask.getX(i2);
+
+      const b0x = srcBase.getX(i0);
+      const b0y = srcBase.getY(i0);
+      const b0z = srcBase.getZ(i0);
+      const b1x = srcBase.getX(i1);
+      const b1y = srcBase.getY(i1);
+      const b1z = srcBase.getZ(i1);
+      const b2x = srcBase.getX(i2);
+      const b2y = srcBase.getY(i2);
+      const b2z = srcBase.getZ(i2);
+
+      const p01x = (p0x + p1x) * 0.5;
+      const p01y = (p0y + p1y) * 0.5;
+      const p01z = (p0z + p1z) * 0.5;
+      const p12x = (p1x + p2x) * 0.5;
+      const p12y = (p1y + p2y) * 0.5;
+      const p12z = (p1z + p2z) * 0.5;
+      const p20x = (p2x + p0x) * 0.5;
+      const p20y = (p2y + p0y) * 0.5;
+      const p20z = (p2z + p0z) * 0.5;
+
+      const m01 = (m0 + m1) * 0.5;
+      const m12 = (m1 + m2) * 0.5;
+      const m20 = (m2 + m0) * 0.5;
+
+      const b01x = (b0x + b1x) * 0.5;
+      const b01y = (b0y + b1y) * 0.5;
+      const b01z = (b0z + b1z) * 0.5;
+      const b12x = (b1x + b2x) * 0.5;
+      const b12y = (b1y + b2y) * 0.5;
+      const b12z = (b1z + b2z) * 0.5;
+      const b20x = (b2x + b0x) * 0.5;
+      const b20y = (b2y + b0y) * 0.5;
+      const b20z = (b2z + b0z) * 0.5;
+
+      // Subdivide one triangle into 4 and carry mask/base attributes through interpolation.
+      write(p0x, p0y, p0z, m0, b0x, b0y, b0z);
+      write(p01x, p01y, p01z, m01, b01x, b01y, b01z);
+      write(p20x, p20y, p20z, m20, b20x, b20y, b20z);
+
+      write(p1x, p1y, p1z, m1, b1x, b1y, b1z);
+      write(p12x, p12y, p12z, m12, b12x, b12y, b12z);
+      write(p01x, p01y, p01z, m01, b01x, b01y, b01z);
+
+      write(p2x, p2y, p2z, m2, b2x, b2y, b2z);
+      write(p20x, p20y, p20z, m20, b20x, b20y, b20z);
+      write(p12x, p12y, p12z, m12, b12x, b12y, b12z);
+
+      write(p01x, p01y, p01z, m01, b01x, b01y, b01z);
+      write(p12x, p12y, p12z, m12, b12x, b12y, b12z);
+      write(p20x, p20y, p20z, m20, b20x, b20y, b20z);
+    }
+
+    const subdivided = new BufferGeometry();
+    subdivided.setAttribute('position', new BufferAttribute(nextPos, 3));
+    subdivided.setAttribute('aMask', new BufferAttribute(nextMask, 1));
+    subdivided.setAttribute('aBasePos', new BufferAttribute(nextBase, 3));
+    const merged = mergeVertices(subdivided, 1e-6);
+    merged.computeVertexNormals();
+
+    const mergedMaskAttr = merged.getAttribute('aMask') as BufferAttribute | undefined;
+    const mergedBaseAttr = merged.getAttribute('aBasePos') as BufferAttribute | undefined;
+    const maskArray = mergedMaskAttr
+      ? Float32Array.from(mergedMaskAttr.array as ArrayLike<number>)
+      : new Float32Array((merged.getAttribute('position') as BufferAttribute).count);
+    const baseArray = mergedBaseAttr
+      ? Float32Array.from(mergedBaseAttr.array as ArrayLike<number>)
+      : Float32Array.from((merged.getAttribute('position') as BufferAttribute).array as ArrayLike<number>);
+    merged.deleteAttribute('aMask');
+    merged.deleteAttribute('aBasePos');
+
+    this.setGeometry(merged);
+    (this.maskAttr.array as Float32Array).set(maskArray);
+    this.maskAttr.needsUpdate = true;
+    this.basePositions = baseArray;
+
+    source.dispose();
+    if (source !== sourceClone) {
+      sourceClone.dispose();
+    }
+    subdivided.dispose();
   }
 
   private updateCurvatureAttribute(): void {
