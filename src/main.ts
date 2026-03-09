@@ -22,7 +22,7 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { FXAAShader } from 'three/examples/jsm/shaders/FXAAShader.js';
-import { DifferentialGrowthEngine } from './core/differentialGrowthEngine';
+import { DifferentialGrowthEngine, type DifferentialGrowthSnapshot } from './core/differentialGrowthEngine';
 import { buildShapeGeometry } from './core/meshFactory';
 import { MaterialController } from './core/materialController';
 import type {
@@ -51,6 +51,8 @@ type UiRefs = {
   clearMask: HTMLButtonElement;
   growthSpeed: HTMLInputElement;
   growthSpeedValue: HTMLSpanElement;
+  timeline: HTMLInputElement;
+  timelineValue: HTMLSpanElement;
   seed: HTMLInputElement;
   seedValueLabel: HTMLSpanElement;
   seedInfluence: HTMLInputElement;
@@ -115,10 +117,12 @@ type UiRefs = {
 };
 
 const FIXED_MASK_BLUR_STRENGTH = 0.35;
+const MAX_TIMELINE_SNAPSHOTS = 240;
 type MaskAction =
   | { kind: 'paint'; point: Vector3; radius: number; falloffOffset: number }
   | { kind: 'erase'; point: Vector3; radius: number; falloffOffset: number }
   | { kind: 'blur'; strength: number };
+type TimelineEntry = { step: number; snapshot: DifferentialGrowthSnapshot };
 
 function revealUiWhenStyled(maxWaitMs = 1500): void {
   const start = performance.now();
@@ -186,6 +190,8 @@ const ui: UiRefs = {
   clearMask: requiredElement('clear-mask', isButton),
   growthSpeed: requiredElement('growth-speed', isInput),
   growthSpeedValue: requiredElement('growth-speed-value', isSpan),
+  timeline: requiredElement('simulation-timeline', isInput),
+  timelineValue: requiredElement('simulation-timeline-value', isSpan),
   seed: requiredElement('seed-value', isInput),
   seedValueLabel: requiredElement('seed-value-label', isSpan),
   seedInfluence: requiredElement('seed-influence', isInput),
@@ -410,6 +416,12 @@ let shapeResetQueued = false;
 let controlsInitialized = false;
 let subdivisionWireframePreviewActive = false;
 const maskActions: MaskAction[] = [];
+const timelineEntries: TimelineEntry[] = [];
+let currentTimelineStep = 0;
+let timelineSliderSyncing = false;
+let timelineRangeBound = false;
+let timelineStepDirty = false;
+resetTimelineToCurrentState();
 
 function syncWireframeVisibility(): void {
   wireframeMesh.visible = shapeSettings.showWireframe || subdivisionWireframePreviewActive;
@@ -435,7 +447,8 @@ function updateRangeProgress(range: HTMLInputElement): void {
   const min = Number.parseFloat(range.min);
   const max = Number.parseFloat(range.max);
   const value = Number.parseFloat(range.value);
-  const progress = ((value - min) / (max - min)) * 100;
+  const span = max - min;
+  const progress = span > 1e-8 ? ((value - min) / span) * 100 : 100;
   range.style.setProperty('--range-progress', `${progress}%`);
 }
 
@@ -539,6 +552,7 @@ function paintAt(hitPoint: Vector3): void {
   mesh.worldToLocal(tempLocal);
   const point = tempLocal.clone();
   engine.paintMask(point, shapeSettings.brushRadius, shapeSettings.falloffOffset);
+  timelineStepDirty = true;
   maskActions.push({
     kind: 'paint',
     point,
@@ -552,6 +566,7 @@ function eraseAt(hitPoint: Vector3): void {
   mesh.worldToLocal(tempLocal);
   const point = tempLocal.clone();
   engine.eraseMask(point, shapeSettings.brushRadius, shapeSettings.falloffOffset);
+  timelineStepDirty = true;
   maskActions.push({
     kind: 'erase',
     point,
@@ -575,6 +590,133 @@ function replayMaskActions(): void {
 
 function clearMaskActionHistory(): void {
   maskActions.length = 0;
+}
+
+function disposeSnapshot(snapshot: DifferentialGrowthSnapshot): void {
+  snapshot.geometry.dispose();
+}
+
+function findTimelineEntryIndex(step: number): number {
+  for (let i = 0; i < timelineEntries.length; i += 1) {
+    if (timelineEntries[i].step === step) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+function syncTimelineSliderState(): void {
+  const minStep = timelineEntries.length > 0 ? timelineEntries[0].step : 0;
+  const maxStep = timelineEntries.length > 0 ? timelineEntries[timelineEntries.length - 1].step : 0;
+  ui.timeline.min = `${minStep}`;
+  ui.timeline.max = `${maxStep}`;
+  currentTimelineStep = Math.min(maxStep, Math.max(minStep, currentTimelineStep));
+  ui.timeline.disabled = appState.running || minStep === maxStep;
+
+  if (timelineRangeBound) {
+    timelineSliderSyncing = true;
+    ui.timeline.value = `${currentTimelineStep}`;
+    ui.timeline.dispatchEvent(new Event('input', { bubbles: true }));
+    timelineSliderSyncing = false;
+    return;
+  }
+
+  ui.timeline.value = `${currentTimelineStep}`;
+  ui.timelineValue.textContent = `${currentTimelineStep}`;
+  updateRangeProgress(ui.timeline);
+}
+
+function resetTimelineToCurrentState(): void {
+  for (let i = 0; i < timelineEntries.length; i += 1) {
+    disposeSnapshot(timelineEntries[i].snapshot);
+  }
+  timelineEntries.length = 0;
+  currentTimelineStep = 0;
+  timelineEntries.push({
+    step: currentTimelineStep,
+    snapshot: engine.exportSnapshot(),
+  });
+  timelineStepDirty = false;
+  syncTimelineSliderState();
+}
+
+function trimTimelineFutureFromCurrentStep(): void {
+  const keepIndex = findTimelineEntryIndex(currentTimelineStep);
+  if (keepIndex < 0 || keepIndex >= timelineEntries.length - 1) {
+    return;
+  }
+  for (let i = keepIndex + 1; i < timelineEntries.length; i += 1) {
+    disposeSnapshot(timelineEntries[i].snapshot);
+  }
+  timelineEntries.length = keepIndex + 1;
+}
+
+function commitCurrentTimelineSnapshotIfDirty(): void {
+  if (appState.running || !timelineStepDirty) {
+    return;
+  }
+  const entryIndex = findTimelineEntryIndex(currentTimelineStep);
+  if (entryIndex < 0) {
+    timelineStepDirty = false;
+    return;
+  }
+
+  if (finalSmoothingSource) {
+    engine.applyFinalSmoothingFromSnapshot(finalSmoothingSource, 0);
+    syncGeometryWithEngine();
+  }
+
+  const previous = timelineEntries[entryIndex].snapshot;
+  timelineEntries[entryIndex].snapshot = engine.exportSnapshot();
+  disposeSnapshot(previous);
+
+  if (finalSmoothingSource) {
+    engine.applyFinalSmoothingFromSnapshot(finalSmoothingSource, finalSmoothingAmount);
+    syncGeometryWithEngine();
+  }
+
+  timelineStepDirty = false;
+}
+
+function appendTimelineStepFromCurrentState(): void {
+  const last = timelineEntries[timelineEntries.length - 1];
+  const nextStep = last ? last.step + 1 : currentTimelineStep + 1;
+  timelineEntries.push({
+    step: nextStep,
+    snapshot: engine.exportSnapshot(),
+  });
+  currentTimelineStep = nextStep;
+  timelineStepDirty = false;
+
+  while (timelineEntries.length > MAX_TIMELINE_SNAPSHOTS) {
+    const removed = timelineEntries.shift();
+    if (!removed) {
+      break;
+    }
+    disposeSnapshot(removed.snapshot);
+  }
+
+  syncTimelineSliderState();
+}
+
+function seekTimelineStep(step: number): void {
+  if (appState.running) {
+    return;
+  }
+  const entryIndex = findTimelineEntryIndex(step);
+  if (entryIndex < 0) {
+    syncTimelineSliderState();
+    return;
+  }
+
+  engine.importSnapshot(timelineEntries[entryIndex].snapshot);
+  syncGeometryWithEngine();
+  currentTimelineStep = timelineEntries[entryIndex].step;
+  finalSmoothingSource = engine.getPositionSnapshot();
+  applyFinalSmoothingPreview();
+  timelineStepDirty = false;
+  syncTimelineSliderState();
+  refreshMaskOverlay();
 }
 
 function syncGeometryWithEngine(): void {
@@ -606,6 +748,8 @@ function setViewMode(mode: ViewMode): void {
 }
 
 function startSimulation(): void {
+  commitCurrentTimelineSnapshotIfDirty();
+  trimTimelineFutureFromCurrentStep();
   if (finalSmoothingSource) {
     engine.applyFinalSmoothingFromSnapshot(finalSmoothingSource, 0);
     syncGeometryWithEngine();
@@ -655,6 +799,7 @@ function resetSimulation(preserveMask = true): void {
     replayMaskActions();
   }
   syncGeometryWithEngine();
+  resetTimelineToCurrentState();
   if (appState.running) {
     finalSmoothingSource = null;
   } else {
@@ -675,6 +820,7 @@ function syncUiState(): void {
   ui.start.classList.toggle('is-start-state', !appState.running);
   ui.start.classList.toggle('is-stop-state', appState.running);
   ui.maskMode.textContent = appState.viewMode === 'mask' ? 'Exit Mask Mode' : 'Enter Mask Mode';
+  syncTimelineSliderState();
   if (appState.running) {
     setOverlayVisible(false);
   }
@@ -1069,6 +1215,23 @@ bindCustomSelect(ui.gradientType);
 bindRange(ui.growthSpeed, ui.growthSpeedValue, (value) => value.toFixed(2), (value) => {
   simulationSettings.growthSpeed = value;
 });
+bindRange(ui.timeline, ui.timelineValue, (value) => `${Math.round(value)}`, (value) => {
+  const requestedStep = Math.round(value);
+  if (timelineSliderSyncing) {
+    return;
+  }
+  if (appState.running) {
+    syncTimelineSliderState();
+    return;
+  }
+  if (requestedStep === currentTimelineStep) {
+    return;
+  }
+  commitCurrentTimelineSnapshotIfDirty();
+  seekTimelineStep(requestedStep);
+});
+timelineRangeBound = true;
+syncTimelineSliderState();
 bindRange(ui.seed, ui.seedValueLabel, (value) => `${Math.round(value)}`, (value) => {
   simulationSettings.seed = Math.round(value);
   engine.reseed(simulationSettings.seed);
@@ -1265,6 +1428,7 @@ ui.blurMask.addEventListener('click', () => {
     stopSimulation();
   }
   engine.blurMask(FIXED_MASK_BLUR_STRENGTH);
+  timelineStepDirty = true;
   maskActions.push({ kind: 'blur', strength: FIXED_MASK_BLUR_STRENGTH });
   enterMaskMode();
 });
@@ -1274,6 +1438,7 @@ ui.clearMask.addEventListener('click', () => {
     stopSimulation();
   }
   engine.clearMask();
+  timelineStepDirty = true;
   clearMaskActionHistory();
   enterMaskMode();
 });
@@ -1434,6 +1599,7 @@ renderer.setAnimationLoop((now) => {
   if (appState.running) {
     engine.step(dt, simulationSettings.growthSpeed, simulationSettings.seedInfluence);
     syncGeometryWithEngine();
+    appendTimelineStepFromCurrentState();
   }
 
   composer.render();

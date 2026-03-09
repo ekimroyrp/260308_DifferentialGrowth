@@ -7,6 +7,14 @@ import { SeededRng } from './seededRng';
 const tempAverage = new Vector3();
 const tempEdge = new Vector3();
 
+export type DifferentialGrowthSnapshot = {
+  geometry: BufferGeometry;
+  basePositions: Float32Array;
+  mask: Float32Array;
+  variation: Float32Array;
+  rngState: number;
+};
+
 export class DifferentialGrowthEngine {
   private geometry: BufferGeometry;
   private topology: GeometryTopology;
@@ -98,6 +106,36 @@ export class DifferentialGrowthEngine {
 
   getPositionSnapshot(): Float32Array {
     return Float32Array.from(this.positionAttr.array as Float32Array);
+  }
+
+  exportSnapshot(): DifferentialGrowthSnapshot {
+    return {
+      geometry: this.geometry.clone(),
+      basePositions: Float32Array.from(this.basePositions),
+      mask: Float32Array.from(this.maskAttr.array as ArrayLike<number>),
+      variation: Float32Array.from(this.variationAttr.array as ArrayLike<number>),
+      rngState: this.rng.getState(),
+    };
+  }
+
+  importSnapshot(snapshot: DifferentialGrowthSnapshot): void {
+    this.setGeometry(snapshot.geometry.clone());
+
+    const vertexCount = this.positionAttr.count;
+    if (snapshot.mask.length === vertexCount) {
+      (this.maskAttr.array as Float32Array).set(snapshot.mask);
+      this.maskAttr.needsUpdate = true;
+    }
+    if (snapshot.variation.length === vertexCount) {
+      (this.variationAttr.array as Float32Array).set(snapshot.variation);
+      this.variationAttr.needsUpdate = true;
+    }
+    const positionLength = vertexCount * 3;
+    if (snapshot.basePositions.length === positionLength) {
+      this.basePositions = Float32Array.from(snapshot.basePositions);
+    }
+    this.rng.setState(snapshot.rngState);
+    this.updateCurvatureAttribute();
   }
 
   applyFinalSmoothingFromSnapshot(sourcePositions: Float32Array, strength: number): void {

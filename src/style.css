@@ -417,6 +417,7 @@ body {
 }
 
 input[type="range"] {
+  --range-fill-color: rgba(197, 215, 255, 0.45);
   appearance: none;
   -webkit-appearance: none;
   width: 100%;
@@ -426,13 +427,17 @@ input[type="range"] {
   background:
     linear-gradient(
       90deg,
-      rgba(197, 215, 255, 0.45) 0,
-      rgba(197, 215, 255, 0.45) var(--range-progress, 0%),
+      var(--range-fill-color) 0,
+      var(--range-fill-color) var(--range-progress, 0%),
       rgba(255, 255, 255, 0.12) var(--range-progress, 0%),
       rgba(255, 255, 255, 0.1) 100%
     );
   cursor: pointer;
   outline: none;
+}
+
+#simulation-timeline {
+  --range-fill-color: rgba(255, 162, 72, 0.6);
 }
 
 input[type="range"]::-webkit-slider-thumb {

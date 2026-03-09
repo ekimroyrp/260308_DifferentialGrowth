@@ -13,4 +13,12 @@ export class SeededRng {
   signed(): number {
     return this.next() * 2 - 1;
   }
+
+  getState(): number {
+    return this.state >>> 0;
+  }
+
+  setState(state: number): void {
+    this.state = (state >>> 0) || 1;
+  }
 }

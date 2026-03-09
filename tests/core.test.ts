@@ -175,6 +175,53 @@ describe('DifferentialGrowthEngine mask operations', () => {
     expect(maxRestoreDelta).toBeLessThan(1e-9);
   });
 
+  it('exports and imports snapshots with deterministic continuation', () => {
+    const settingsNoSplit: GrowthSettings = {
+      ...growthSettings,
+      targetEdgeLength: 1,
+      splitThreshold: 2,
+      maxVertices: 100000,
+    };
+    const geometry = buildShapeGeometry('sphere');
+    const engine = new DifferentialGrowthEngine(geometry, settingsNoSplit, 4242);
+    engine.paintMask(new Vector3(0, 0, 1.15), 0.2, 0.05);
+
+    for (let i = 0; i < 3; i += 1) {
+      engine.step(0.02, 1.15, 0.45);
+    }
+
+    const snapshot = engine.exportSnapshot();
+    engine.step(0.02, 1.15, 0.45);
+    const forwardA = Float32Array.from(
+      ((engine.getGeometry().getAttribute('position') as BufferAttribute).array as Float32Array),
+    );
+
+    engine.importSnapshot(snapshot);
+    engine.step(0.02, 1.15, 0.45);
+    const forwardB = (engine.getGeometry().getAttribute('position') as BufferAttribute).array as Float32Array;
+
+    let maxDelta = 0;
+    for (let i = 0; i < forwardA.length; i += 1) {
+      const delta = Math.abs(forwardA[i] - forwardB[i]);
+      if (delta > maxDelta) {
+        maxDelta = delta;
+      }
+    }
+    expect(maxDelta).toBeLessThan(1e-9);
+
+    const restoredMask = (engine.getGeometry().getAttribute('aMask') as BufferAttribute).array as Float32Array;
+    let maxMaskDelta = 0;
+    for (let i = 0; i < restoredMask.length; i += 1) {
+      const delta = Math.abs(restoredMask[i] - snapshot.mask[i]);
+      if (delta > maxMaskDelta) {
+        maxMaskDelta = delta;
+      }
+    }
+    expect(maxMaskDelta).toBeLessThan(1e-9);
+
+    snapshot.geometry.dispose();
+  });
+
   it('black mask suppresses growth while still allowing non-growth motion', () => {
     const settingsWithForces: GrowthSettings = {
       ...growthSettings,
