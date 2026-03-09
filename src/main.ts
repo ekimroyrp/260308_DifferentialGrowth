@@ -335,6 +335,7 @@ let draggingPanel = false;
 const dragOffset = { x: 0, y: 0 };
 let pointerDown = false;
 let painting = false;
+let erasing = false;
 
 function prepareGeometry(geometry: BufferGeometry): void {
   geometry.computeVertexNormals();
@@ -431,6 +432,12 @@ function paintAt(hitPoint: Vector3): void {
   engine.paintMask(tempLocal, shapeSettings.brushRadius, shapeSettings.falloffOffset);
 }
 
+function eraseAt(hitPoint: Vector3): void {
+  tempLocal.copy(hitPoint);
+  mesh.worldToLocal(tempLocal);
+  engine.eraseMask(tempLocal, shapeSettings.brushRadius, shapeSettings.falloffOffset);
+}
+
 function setViewMode(mode: ViewMode): void {
   appState.viewMode = mode;
   materialController.setViewMode(mode);
@@ -451,6 +458,11 @@ function stopSimulation(): void {
 function enterMaskMode(): void {
   appState.running = false;
   setViewMode('mask');
+  syncUiState();
+}
+
+function exitMaskMode(): void {
+  setViewMode('curvature');
   syncUiState();
 }
 
@@ -478,6 +490,7 @@ function syncUiState(): void {
   ui.start.textContent = appState.running ? 'Stop' : 'Start';
   ui.start.classList.toggle('is-start-state', !appState.running);
   ui.start.classList.toggle('is-stop-state', appState.running);
+  ui.maskMode.textContent = appState.viewMode === 'mask' ? 'Exit Mask Mode' : 'Enter Mask Mode';
   if (appState.running) {
     setOverlayVisible(false);
   }
@@ -649,7 +662,11 @@ ui.start.addEventListener('click', () => {
 });
 
 ui.maskMode.addEventListener('click', () => {
-  enterMaskMode();
+  if (appState.viewMode === 'mask') {
+    exitMaskMode();
+  } else {
+    enterMaskMode();
+  }
 });
 
 ui.reset.addEventListener('click', () => {
@@ -716,10 +733,10 @@ window.addEventListener('pointercancel', () => {
 });
 
 renderer.domElement.addEventListener('pointerdown', (event) => {
-  if (event.button !== 0 || isPanelTarget(event)) {
+  if (isPanelTarget(event)) {
     return;
   }
-  pointerDown = true;
+
   updatePointer(event);
   const hit = currentHit();
   if (hit) {
@@ -728,9 +745,16 @@ renderer.domElement.addEventListener('pointerdown', (event) => {
     setOverlayVisible(false);
   }
 
-  if (!appState.running && appState.viewMode === 'mask' && hit) {
+  const canMaskPaint = !appState.running && appState.viewMode === 'mask' && event.button === 0;
+  if (canMaskPaint && hit) {
+    pointerDown = true;
     painting = true;
-    paintAt(hit.point);
+    erasing = event.shiftKey;
+    if (erasing) {
+      eraseAt(hit.point);
+    } else {
+      paintAt(hit.point);
+    }
   }
 });
 
@@ -744,7 +768,12 @@ window.addEventListener('pointermove', (event) => {
   const hit = currentHit();
 
   if (pointerDown && painting && hit) {
-    paintAt(hit.point);
+    erasing = event.shiftKey;
+    if (erasing) {
+      eraseAt(hit.point);
+    } else {
+      paintAt(hit.point);
+    }
   }
 
   if (hit) {
@@ -757,6 +786,7 @@ window.addEventListener('pointermove', (event) => {
 window.addEventListener('pointerup', (event) => {
   pointerDown = false;
   painting = false;
+  erasing = false;
   updatePointer(event);
   const hit = currentHit();
   if (hit) {
@@ -769,6 +799,7 @@ window.addEventListener('pointerup', (event) => {
 window.addEventListener('pointercancel', () => {
   pointerDown = false;
   painting = false;
+  erasing = false;
   setOverlayVisible(false);
 });
 

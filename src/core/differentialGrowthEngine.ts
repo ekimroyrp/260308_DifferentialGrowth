@@ -168,6 +168,36 @@ export class DifferentialGrowthEngine {
     this.maskAttr.needsUpdate = true;
   }
 
+  eraseMask(localPoint: Vector3, radius: number, falloffOffset: number): void {
+    const pos = this.positionAttr.array as Float32Array;
+    const mask = this.maskAttr.array as Float32Array;
+    const outer = radius + Math.max(0, falloffOffset);
+    const hasFalloff = outer > radius + 1e-6;
+    const px = localPoint.x;
+    const py = localPoint.y;
+    const pz = localPoint.z;
+
+    for (let i = 0; i < mask.length; i += 1) {
+      const index = i * 3;
+      const dx = pos[index] - px;
+      const dy = pos[index + 1] - py;
+      const dz = pos[index + 2] - pz;
+      const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+      if (dist > outer) {
+        continue;
+      }
+
+      let strength = 1;
+      if (dist > radius && hasFalloff) {
+        const t = (dist - radius) / (outer - radius);
+        strength = Math.max(0, 1 - t);
+      }
+      mask[i] = Math.max(0, mask[i] - strength);
+    }
+
+    this.maskAttr.needsUpdate = true;
+  }
+
   step(deltaSeconds: number, growthSpeed: number, seedInfluence = 0.35): void {
     const safeDt = Math.min(Math.max(deltaSeconds, 0), 1 / 20);
     if (safeDt <= 0) {
