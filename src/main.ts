@@ -7,6 +7,7 @@ import {
   DynamicDrawUsage,
   MOUSE,
   MeshBasicMaterial,
+  MeshStandardMaterial,
   Mesh,
   PerspectiveCamera,
   Raycaster,
@@ -17,6 +18,7 @@ import {
   WebGLRenderer,
 } from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
@@ -110,6 +112,8 @@ type UiRefs = {
   specularValue: HTMLSpanElement;
   bloom: HTMLInputElement;
   bloomValue: HTMLSpanElement;
+  exportObj: HTMLButtonElement;
+  exportGlb: HTMLButtonElement;
   overlay: SVGSVGElement;
   brushCircle: SVGCircleElement;
   falloffCircle: SVGCircleElement;
@@ -249,6 +253,8 @@ const ui: UiRefs = {
   specularValue: requiredElement('specular-value', isSpan),
   bloom: requiredElement('bloom', isInput),
   bloomValue: requiredElement('bloom-value', isSpan),
+  exportObj: requiredElement('export-obj', isButton),
+  exportGlb: requiredElement('export-glb', isButton),
   overlay: requiredElement('brush-overlay', isSvg),
   brushCircle: requiredElement('brush-circle', isSvgCircle),
   falloffCircle: requiredElement('falloff-circle', isSvgCircle),
@@ -590,6 +596,159 @@ function replayMaskActions(): void {
 
 function clearMaskActionHistory(): void {
   maskActions.length = 0;
+}
+
+function clamp01(value: number): number {
+  return Math.min(1, Math.max(0, value));
+}
+
+function buildExportVertexColors(geometry: BufferGeometry): Float32Array {
+  const position = geometry.getAttribute('position') as BufferAttribute;
+  const vertexCount = position.count;
+  const colors = new Float32Array(vertexCount * 3);
+  const mask = geometry.getAttribute('aMask') as BufferAttribute | undefined;
+  const curvature = geometry.getAttribute('aCurvature') as BufferAttribute | undefined;
+  const displacement = geometry.getAttribute('aDisplacement') as BufferAttribute | undefined;
+  const start = new Color(materialSettings.gradientStart);
+  const end = new Color(materialSettings.gradientEnd);
+  const color = new Color();
+
+  for (let i = 0; i < vertexCount; i += 1) {
+    const write = i * 3;
+    if (appState.viewMode === 'mask') {
+      const maskValue = mask ? clamp01(mask.getX(i)) : 0;
+      const shade = clamp01(1 - maskValue);
+      colors[write] = shade;
+      colors[write + 1] = shade;
+      colors[write + 2] = shade;
+      continue;
+    }
+
+    const sourceValue =
+      materialSettings.gradientType === 'displacement'
+        ? displacement?.getX(i) ?? 0
+        : curvature?.getX(i) ?? 0;
+    const t = clamp01(sourceValue * materialSettings.curvatureContrast + materialSettings.curvatureBias);
+    color.copy(start).lerp(end, t);
+    colors[write] = clamp01(color.r);
+    colors[write + 1] = clamp01(color.g);
+    colors[write + 2] = clamp01(color.b);
+  }
+
+  return colors;
+}
+
+function buildObjWithVertexColors(geometry: BufferGeometry, colors: Float32Array): string {
+  const position = geometry.getAttribute('position') as BufferAttribute;
+  let normal = geometry.getAttribute('normal') as BufferAttribute | undefined;
+  if (!normal) {
+    geometry.computeVertexNormals();
+    normal = geometry.getAttribute('normal') as BufferAttribute;
+  }
+  const index = geometry.getIndex();
+  const format = (value: number): string => value.toFixed(6);
+  const lines: string[] = [];
+  lines.push('# Differential Growth OBJ export');
+  lines.push('# Vertex colors are encoded as extended OBJ vertex lines: v x y z r g b');
+
+  for (let i = 0; i < position.count; i += 1) {
+    const colorIndex = i * 3;
+    lines.push(
+      `v ${format(position.getX(i))} ${format(position.getY(i))} ${format(position.getZ(i))} ${format(colors[colorIndex])} ${format(colors[colorIndex + 1])} ${format(colors[colorIndex + 2])}`,
+    );
+  }
+
+  for (let i = 0; i < normal.count; i += 1) {
+    lines.push(`vn ${format(normal.getX(i))} ${format(normal.getY(i))} ${format(normal.getZ(i))}`);
+  }
+
+  if (index) {
+    for (let i = 0; i < index.count; i += 3) {
+      const a = index.getX(i) + 1;
+      const b = index.getX(i + 1) + 1;
+      const c = index.getX(i + 2) + 1;
+      lines.push(`f ${a}//${a} ${b}//${b} ${c}//${c}`);
+    }
+  } else {
+    for (let i = 0; i < position.count; i += 3) {
+      const a = i + 1;
+      const b = i + 2;
+      const c = i + 3;
+      lines.push(`f ${a}//${a} ${b}//${b} ${c}//${c}`);
+    }
+  }
+
+  return `${lines.join('\n')}\n`;
+}
+
+function downloadObj(filename: string, content: string): void {
+  const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => {
+    URL.revokeObjectURL(url);
+  }, 0);
+}
+
+function downloadBinary(filename: string, data: ArrayBuffer, mimeType: string): void {
+  const blob = new Blob([data], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => {
+    URL.revokeObjectURL(url);
+  }, 0);
+}
+
+function exportCurrentMeshAsGlb(filename: string): void {
+  syncGeometryWithEngine();
+  const sourceGeometry = engine.getGeometry();
+  const exportGeometry = sourceGeometry.clone();
+  if (!exportGeometry.getAttribute('normal')) {
+    exportGeometry.computeVertexNormals();
+  }
+  const colors = buildExportVertexColors(sourceGeometry);
+  exportGeometry.setAttribute('color', new BufferAttribute(colors, 3));
+
+  const exportMaterial = new MeshStandardMaterial({
+    vertexColors: true,
+    metalness: 0,
+    roughness: 1,
+  });
+  const exportMesh = new Mesh(exportGeometry, exportMaterial);
+  exportMesh.name = 'DifferentialGrowthMesh';
+
+  const cleanup = (): void => {
+    exportGeometry.dispose();
+    exportMaterial.dispose();
+  };
+
+  const exporter = new GLTFExporter();
+  exporter.parse(
+    exportMesh,
+    (result) => {
+      if (result instanceof ArrayBuffer) {
+        downloadBinary(filename, result, 'model/gltf-binary');
+      } else {
+        console.error('GLB export expected binary output but received JSON.');
+      }
+      cleanup();
+    },
+    (error) => {
+      console.error('GLB export failed.', error);
+      cleanup();
+    },
+    { binary: true, onlyVisible: false },
+  );
 }
 
 function disposeSnapshot(snapshot: DifferentialGrowthSnapshot): void {
@@ -1402,6 +1561,18 @@ ui.resetTransform.addEventListener('click', () => {
   setRangeValue(ui.rotateX, 0);
   setRangeValue(ui.rotateY, 0);
   setRangeValue(ui.rotateZ, 0);
+});
+
+ui.exportObj.addEventListener('click', () => {
+  syncGeometryWithEngine();
+  const geometry = engine.getGeometry();
+  const colors = buildExportVertexColors(geometry);
+  const obj = buildObjWithVertexColors(geometry, colors);
+  downloadObj(`differential-growth-step-${currentTimelineStep}.obj`, obj);
+});
+
+ui.exportGlb.addEventListener('click', () => {
+  exportCurrentMeshAsGlb(`differential-growth-step-${currentTimelineStep}.glb`);
 });
 
 ui.start.addEventListener('click', () => {
