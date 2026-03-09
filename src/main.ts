@@ -549,6 +549,33 @@ function bindRange(
   update();
 }
 
+function bindSectionCollapseToggles(): void {
+  const headers = ui.panel.querySelectorAll<HTMLDivElement>('.panel-section-header');
+  headers.forEach((header) => {
+    const section = header.closest('.panel-section');
+    if (!section) {
+      return;
+    }
+
+    header.setAttribute('role', 'button');
+    header.setAttribute('tabindex', '0');
+    header.setAttribute('aria-expanded', section.classList.contains('is-collapsed') ? 'false' : 'true');
+
+    const toggle = (): void => {
+      const collapsed = section.classList.toggle('is-collapsed');
+      header.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+    };
+
+    header.addEventListener('click', toggle);
+    header.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        toggle();
+      }
+    });
+  });
+}
+
 function bindSelectArrow(select: HTMLSelectElement): void {
   const control = select.closest('.select-control');
   if (!control) {
@@ -582,6 +609,7 @@ function bindSelectArrow(select: HTMLSelectElement): void {
   });
 }
 
+bindSectionCollapseToggles();
 bindSelectArrow(ui.baseShape);
 bindSelectArrow(ui.gradientType);
 
