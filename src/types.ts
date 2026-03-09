@@ -33,6 +33,7 @@ export type MaterialSettings = {
   gradientEnd: string;
   curvatureContrast: number;
   curvatureBias: number;
+  gradientBlur: number;
   fresnel: number;
   specular: number;
   bloom: number;

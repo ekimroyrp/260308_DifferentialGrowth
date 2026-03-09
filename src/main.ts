@@ -82,6 +82,8 @@ type UiRefs = {
   curvatureContrastValue: HTMLSpanElement;
   curvatureBias: HTMLInputElement;
   curvatureBiasValue: HTMLSpanElement;
+  gradientBlur: HTMLInputElement;
+  gradientBlurValue: HTMLSpanElement;
   fresnel: HTMLInputElement;
   fresnelValue: HTMLSpanElement;
   specular: HTMLInputElement;
@@ -196,6 +198,8 @@ const ui: UiRefs = {
   curvatureContrastValue: requiredElement('curvature-contrast-value', isSpan),
   curvatureBias: requiredElement('curvature-bias', isInput),
   curvatureBiasValue: requiredElement('curvature-bias-value', isSpan),
+  gradientBlur: requiredElement('gradient-blur', isInput),
+  gradientBlurValue: requiredElement('gradient-blur-value', isSpan),
   fresnel: requiredElement('fresnel', isInput),
   fresnelValue: requiredElement('fresnel-value', isSpan),
   specular: requiredElement('specular', isInput),
@@ -248,6 +252,7 @@ const materialSettings: MaterialSettings = {
   gradientEnd: ui.gradientEnd.value,
   curvatureContrast: Number.parseFloat(ui.curvatureContrast.value),
   curvatureBias: Number.parseFloat(ui.curvatureBias.value),
+  gradientBlur: Number.parseFloat(ui.gradientBlur.value),
   fresnel: Number.parseFloat(ui.fresnel.value),
   specular: Number.parseFloat(ui.specular.value),
   bloom: Number.parseFloat(ui.bloom.value),
@@ -285,6 +290,7 @@ controls.mouseButtons = {
 };
 controls.update();
 renderer.domElement.addEventListener('contextmenu', (event) => event.preventDefault());
+window.addEventListener('contextmenu', (event) => event.preventDefault());
 
 const materialController = new MaterialController(materialSettings);
 const initialGeometry = buildShapeGeometry(shapeSettings.baseShape, shapeSettings.subdivision);
@@ -308,6 +314,7 @@ wireframeMesh.renderOrder = 1;
 scene.add(wireframeMesh);
 
 const engine = new DifferentialGrowthEngine(initialGeometry, growthSettings, simulationSettings.seed);
+engine.setGradientBlur(materialSettings.gradientBlur);
 
 const composer = new EffectComposer(renderer);
 const renderPass = new RenderPass(scene, camera);
@@ -336,6 +343,7 @@ const dragOffset = { x: 0, y: 0 };
 let pointerDown = false;
 let painting = false;
 let erasing = false;
+let shiftDown = false;
 
 function prepareGeometry(geometry: BufferGeometry): void {
   geometry.computeVertexNormals();
@@ -360,6 +368,14 @@ function setOverlayVisible(visible: boolean): void {
   ui.falloffCircle.style.opacity = visible && shapeSettings.falloffOffset > 0 ? '1' : '0';
 }
 
+function setOverlayModeColors(eraseMode: boolean): void {
+  const innerColor = eraseMode ? 'rgba(255, 72, 72, 0.98)' : 'rgba(80, 235, 110, 0.98)';
+  const outerColor = eraseMode ? 'rgba(255, 72, 72, 0.72)' : 'rgba(80, 235, 110, 0.72)';
+  ui.brushCircle.style.stroke = innerColor;
+  ui.brushDot.style.fill = innerColor;
+  ui.falloffCircle.style.stroke = outerColor;
+}
+
 function worldToScreen(worldPoint: Vector3): Vector2 {
   tempVec.copy(worldPoint).project(camera);
   tempScreen.set(
@@ -369,7 +385,7 @@ function worldToScreen(worldPoint: Vector3): Vector2 {
   return tempScreen.clone();
 }
 
-function updateOverlay(hitPoint: Vector3 | null, faceNormal: Vector3 | null): void {
+function updateOverlay(hitPoint: Vector3 | null, faceNormal: Vector3 | null, eraseMode: boolean): void {
   if (!hitPoint || !faceNormal || appState.running || appState.viewMode !== 'mask') {
     setOverlayVisible(false);
     return;
@@ -400,7 +416,21 @@ function updateOverlay(hitPoint: Vector3 | null, faceNormal: Vector3 | null): vo
   ui.brushDot.setAttribute('cx', `${center.x}`);
   ui.brushDot.setAttribute('cy', `${center.y}`);
   ui.brushDot.setAttribute('r', '4');
+  setOverlayModeColors(eraseMode);
   setOverlayVisible(true);
+}
+
+function refreshMaskOverlay(): void {
+  if (appState.running || appState.viewMode !== 'mask') {
+    setOverlayVisible(false);
+    return;
+  }
+  const hit = currentHit();
+  if (hit) {
+    updateOverlay(hit.point, hit.normal, shiftDown);
+  } else {
+    setOverlayVisible(false);
+  }
 }
 
 function updatePointer(event: PointerEvent): void {
@@ -459,6 +489,7 @@ function enterMaskMode(): void {
   appState.running = false;
   setViewMode('mask');
   syncUiState();
+  refreshMaskOverlay();
 }
 
 function exitMaskMode(): void {
@@ -475,8 +506,6 @@ function resetSimulation(): void {
   previousGeometry.dispose();
   engine.reseed(simulationSettings.seed);
   engine.setGeometry(nextGeometry);
-  controls.target.set(0, 0, 0);
-  camera.position.set(0, 0.25, 4.2);
   controls.update();
   setOverlayVisible(false);
   if (appState.viewMode === 'mask') {
@@ -671,6 +700,10 @@ bindRange(ui.curvatureBias, ui.curvatureBiasValue, (value) => value.toFixed(2), 
   materialSettings.curvatureBias = value;
   materialController.setMaterialSettings(materialSettings);
 });
+bindRange(ui.gradientBlur, ui.gradientBlurValue, (value) => value.toFixed(2), (value) => {
+  materialSettings.gradientBlur = value;
+  engine.setGradientBlur(value);
+});
 bindRange(ui.fresnel, ui.fresnelValue, (value) => value.toFixed(2), (value) => {
   materialSettings.fresnel = value;
   materialController.setMaterialSettings(materialSettings);
@@ -750,9 +783,7 @@ ui.clearMask.addEventListener('click', () => {
     stopSimulation();
   }
   engine.clearMask();
-  if (appState.viewMode === 'mask') {
-    setViewMode('mask');
-  }
+  enterMaskMode();
 });
 
 ui.collapseToggle.addEventListener('pointerdown', (event) => {
@@ -796,15 +827,39 @@ window.addEventListener('pointercancel', () => {
   draggingPanel = false;
 });
 
+window.addEventListener('keydown', (event) => {
+  if (event.key !== 'Shift') {
+    return;
+  }
+  shiftDown = true;
+  if (painting) {
+    erasing = true;
+  }
+  refreshMaskOverlay();
+});
+
+window.addEventListener('keyup', (event) => {
+  if (event.key !== 'Shift') {
+    return;
+  }
+  shiftDown = false;
+  if (painting) {
+    erasing = false;
+  }
+  refreshMaskOverlay();
+});
+
 renderer.domElement.addEventListener('pointerdown', (event) => {
   if (isPanelTarget(event)) {
     return;
   }
 
+  shiftDown = event.shiftKey;
   updatePointer(event);
   const hit = currentHit();
+  const eraseMode = !appState.running && appState.viewMode === 'mask' && shiftDown;
   if (hit) {
-    updateOverlay(hit.point, hit.normal);
+    updateOverlay(hit.point, hit.normal, eraseMode);
   } else {
     setOverlayVisible(false);
   }
@@ -830,9 +885,10 @@ window.addEventListener('pointermove', (event) => {
 
   updatePointer(event);
   const hit = currentHit();
+  shiftDown = event.shiftKey;
 
   if (pointerDown && painting && hit) {
-    erasing = event.shiftKey;
+    erasing = shiftDown;
     if (erasing) {
       eraseAt(hit.point);
     } else {
@@ -841,7 +897,8 @@ window.addEventListener('pointermove', (event) => {
   }
 
   if (hit) {
-    updateOverlay(hit.point, hit.normal);
+    const eraseMode = !appState.running && appState.viewMode === 'mask' && shiftDown;
+    updateOverlay(hit.point, hit.normal, eraseMode);
   } else {
     setOverlayVisible(false);
   }
@@ -851,10 +908,12 @@ window.addEventListener('pointerup', (event) => {
   pointerDown = false;
   painting = false;
   erasing = false;
+  shiftDown = event.shiftKey;
   updatePointer(event);
   const hit = currentHit();
   if (hit) {
-    updateOverlay(hit.point, hit.normal);
+    const eraseMode = !appState.running && appState.viewMode === 'mask' && shiftDown;
+    updateOverlay(hit.point, hit.normal, eraseMode);
   } else {
     setOverlayVisible(false);
   }
@@ -864,6 +923,7 @@ window.addEventListener('pointercancel', () => {
   pointerDown = false;
   painting = false;
   erasing = false;
+  shiftDown = false;
   setOverlayVisible(false);
 });
 

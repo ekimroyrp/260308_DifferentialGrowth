@@ -6,8 +6,6 @@ import { SeededRng } from './seededRng';
 
 const tempAverage = new Vector3();
 const tempEdge = new Vector3();
-const CURVATURE_BLUR_PASSES = 2;
-const CURVATURE_BLUR_STRENGTH = 0.34;
 
 export class DifferentialGrowthEngine {
   private geometry: BufferGeometry;
@@ -24,6 +22,7 @@ export class DifferentialGrowthEngine {
   private deltaWork: Float32Array;
   private smoothWork: Float32Array;
   private rng: SeededRng;
+  private gradientBlur: number;
 
   constructor(geometry: BufferGeometry, settings: GrowthSettings, seed: number) {
     this.geometry = geometry;
@@ -40,6 +39,7 @@ export class DifferentialGrowthEngine {
     this.deltaWork = new Float32Array();
     this.smoothWork = new Float32Array();
     this.rng = new SeededRng(seed);
+    this.gradientBlur = 0.35;
     this.setGeometry(geometry);
   }
 
@@ -89,6 +89,11 @@ export class DifferentialGrowthEngine {
 
   reseed(seed: number): void {
     this.rng = new SeededRng(seed);
+  }
+
+  setGradientBlur(strength: number): void {
+    this.gradientBlur = MathUtils.clamp(strength, 0, 1);
+    this.updateCurvatureAttribute();
   }
 
   resetToBase(clearMask = true): void {
@@ -764,43 +769,8 @@ export class DifferentialGrowthEngine {
       curvatureArray[i] = MathUtils.clamp((curvatureArray[i] - minCurvature) * invSpan, 0, 1);
     }
 
-    // Blend curvature locally so gradient transitions are smoother across neighboring vertices.
-    if (CURVATURE_BLUR_PASSES > 0 && CURVATURE_BLUR_STRENGTH > 0) {
-      const blurWork = this.curvatureWork;
-      for (let pass = 0; pass < CURVATURE_BLUR_PASSES; pass += 1) {
-        for (let i = 0; i < curvatureArray.length; i += 1) {
-          const neighbors = adjacency[i];
-          if (!neighbors || neighbors.length === 0) {
-            blurWork[i] = curvatureArray[i];
-            continue;
-          }
-          let sum = 0;
-          for (let j = 0; j < neighbors.length; j += 1) {
-            sum += curvatureArray[neighbors[j]];
-          }
-          const average = sum / neighbors.length;
-          blurWork[i] = MathUtils.lerp(curvatureArray[i], average, CURVATURE_BLUR_STRENGTH);
-        }
-        curvatureArray.set(blurWork);
-      }
-
-      let postBlurMin = Number.POSITIVE_INFINITY;
-      let postBlurMax = Number.NEGATIVE_INFINITY;
-      for (let i = 0; i < curvatureArray.length; i += 1) {
-        const value = curvatureArray[i];
-        if (value < postBlurMin) {
-          postBlurMin = value;
-        }
-        if (value > postBlurMax) {
-          postBlurMax = value;
-        }
-      }
-      const postSpan = Math.max(postBlurMax - postBlurMin, 1e-6);
-      const invPostSpan = 1 / postSpan;
-      for (let i = 0; i < curvatureArray.length; i += 1) {
-        curvatureArray[i] = MathUtils.clamp((curvatureArray[i] - postBlurMin) * invPostSpan, 0, 1);
-      }
-    }
+    this.blurScalarField(curvatureArray);
+    this.renormalizeScalarField(curvatureArray);
 
     for (let i = 0; i < curvatureArray.length; i += 1) {
       const index = i * 3;
@@ -821,6 +791,9 @@ export class DifferentialGrowthEngine {
     } else {
       displacementArray.fill(0);
     }
+    this.blurScalarField(displacementArray);
+    this.renormalizeScalarField(displacementArray);
+
     this.curvatureAttr.needsUpdate = true;
     this.displacementAttr.needsUpdate = true;
   }
@@ -831,5 +804,51 @@ export class DifferentialGrowthEngine {
       variationArray[i] = this.rng.signed();
     }
     this.variationAttr.needsUpdate = true;
+  }
+
+  private blurScalarField(values: Float32Array): void {
+    const amount = MathUtils.clamp(this.gradientBlur * 0.42, 0, 0.42);
+    if (amount <= 0) {
+      return;
+    }
+    const passes = Math.max(1, Math.round(1 + this.gradientBlur * 5));
+    const work = this.curvatureWork;
+    const adjacency = this.topology.adjacency;
+
+    for (let pass = 0; pass < passes; pass += 1) {
+      for (let i = 0; i < values.length; i += 1) {
+        const neighbors = adjacency[i];
+        if (!neighbors || neighbors.length === 0) {
+          work[i] = values[i];
+          continue;
+        }
+        let sum = 0;
+        for (let j = 0; j < neighbors.length; j += 1) {
+          sum += values[neighbors[j]];
+        }
+        const average = sum / neighbors.length;
+        work[i] = MathUtils.lerp(values[i], average, amount);
+      }
+      values.set(work);
+    }
+  }
+
+  private renormalizeScalarField(values: Float32Array): void {
+    let minValue = Number.POSITIVE_INFINITY;
+    let maxValue = Number.NEGATIVE_INFINITY;
+    for (let i = 0; i < values.length; i += 1) {
+      const value = values[i];
+      if (value < minValue) {
+        minValue = value;
+      }
+      if (value > maxValue) {
+        maxValue = value;
+      }
+    }
+    const span = Math.max(maxValue - minValue, 1e-6);
+    const invSpan = 1 / span;
+    for (let i = 0; i < values.length; i += 1) {
+      values[i] = MathUtils.clamp((values[i] - minValue) * invSpan, 0, 1);
+    }
   }
 }

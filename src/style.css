@@ -55,21 +55,21 @@ body {
 
 #brush-circle {
   fill: none;
-  stroke: #111111;
+  stroke: rgba(80, 235, 110, 0.98);
   stroke-width: 2;
   opacity: 0;
 }
 
 #falloff-circle {
   fill: none;
-  stroke: rgba(45, 45, 45, 0.7);
+  stroke: rgba(80, 235, 110, 0.72);
   stroke-width: 1.5;
   opacity: 0;
   stroke-dasharray: 4 4;
 }
 
 #brush-dot {
-  fill: #111111;
+  fill: rgba(80, 235, 110, 0.98);
   opacity: 0;
 }
 
@@ -131,6 +131,15 @@ body {
 
 .collapse-button:hover {
   background: rgba(255, 255, 255, 0.14);
+}
+
+.collapse-button:focus {
+  outline: none;
+}
+
+.collapse-button:focus-visible {
+  outline: 1px solid rgba(203, 217, 255, 0.48);
+  outline-offset: 1px;
 }
 
 .collapse-icon {
@@ -329,6 +338,15 @@ body {
   border-color: rgba(255, 255, 255, 0.1);
   background: rgba(255, 255, 255, 0.05);
   cursor: not-allowed;
+}
+
+.pill-button:focus {
+  outline: none;
+}
+
+.pill-button:focus-visible {
+  outline: 1px solid rgba(203, 217, 255, 0.48);
+  outline-offset: 1px;
 }
 
 .control-button-wide {

@@ -21,6 +21,7 @@ const materialSettings: MaterialSettings = {
   gradientEnd: '#2e4fb4',
   curvatureContrast: 1.25,
   curvatureBias: 0,
+  gradientBlur: 0.35,
   fresnel: 0.6,
   specular: 0.6,
   bloom: 0,
