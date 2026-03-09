@@ -752,42 +752,193 @@ function bindSectionCollapseToggles(): void {
   });
 }
 
-function bindSelectArrow(select: HTMLSelectElement): void {
+function bindCustomSelect(select: HTMLSelectElement): void {
   const control = select.closest('.select-control');
-  if (!control) {
+  const shell = control?.querySelector('.select-shell');
+  if (!control || !shell) {
     return;
   }
+  select.classList.add('native-select-hidden');
+
+  const trigger = document.createElement('button');
+  trigger.type = 'button';
+  trigger.className = 'select-trigger';
+  trigger.id = `${select.id}-trigger`;
+  trigger.setAttribute('aria-haspopup', 'listbox');
+  trigger.setAttribute('aria-expanded', 'false');
+
+  const menu = document.createElement('ul');
+  menu.className = 'select-menu';
+  menu.id = `${select.id}-menu`;
+  menu.hidden = true;
+  menu.setAttribute('role', 'listbox');
+  menu.setAttribute('aria-labelledby', trigger.id);
+
+  type OptionButton = HTMLButtonElement & { dataset: DOMStringMap & { value: string; index: string } };
+  const optionButtons: OptionButton[] = [];
+  const optionValues = Array.from(select.options).map((option) => option.value);
+
+  const buildOptionButton = (index: number, label: string, value: string): OptionButton => {
+    const item = document.createElement('li');
+    const button = document.createElement('button') as OptionButton;
+    button.type = 'button';
+    button.className = 'select-option';
+    button.dataset.value = value;
+    button.dataset.index = `${index}`;
+    button.textContent = label;
+    button.setAttribute('role', 'option');
+    item.appendChild(button);
+    menu.appendChild(item);
+    return button;
+  };
+
+  Array.from(select.options).forEach((option, index) => {
+    const button = buildOptionButton(index, option.textContent ?? option.value, option.value);
+    optionButtons.push(button);
+  });
+
+  let activeIndex = Math.max(0, optionValues.indexOf(select.value));
 
   const setOpen = (open: boolean): void => {
     control.classList.toggle('is-open', open);
+    menu.hidden = !open;
+    trigger.setAttribute('aria-expanded', open ? 'true' : 'false');
   };
 
-  select.addEventListener('focus', () => {
+  const updateSelectionUi = (): void => {
+    const selectedIndex = Math.max(0, optionValues.indexOf(select.value));
+    const selectedButton = optionButtons[selectedIndex];
+    trigger.textContent = selectedButton?.textContent ?? select.value;
+    optionButtons.forEach((button, index) => {
+      const selected = index === selectedIndex;
+      const active = index === activeIndex;
+      button.classList.toggle('is-selected', selected);
+      button.classList.toggle('is-active', active);
+      button.setAttribute('aria-selected', selected ? 'true' : 'false');
+      button.tabIndex = active ? 0 : -1;
+    });
+  };
+
+  const setActiveIndex = (index: number): void => {
+    if (optionButtons.length === 0) {
+      return;
+    }
+    const count = optionButtons.length;
+    activeIndex = ((index % count) + count) % count;
+    updateSelectionUi();
+  };
+
+  const chooseIndex = (index: number): void => {
+    const nextValue = optionValues[index];
+    if (nextValue === undefined) {
+      return;
+    }
+    const changed = select.value !== nextValue;
+    select.value = nextValue;
+    activeIndex = index;
+    updateSelectionUi();
+    setOpen(false);
+    if (changed) {
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+  };
+
+  const openMenu = (focusOption = false): void => {
+    setActiveIndex(Math.max(0, optionValues.indexOf(select.value)));
     setOpen(true);
-  });
+    if (focusOption) {
+      optionButtons[activeIndex]?.focus();
+    }
+  };
+
   select.addEventListener('change', () => {
+    activeIndex = Math.max(0, optionValues.indexOf(select.value));
+    updateSelectionUi();
     setOpen(false);
   });
-  select.addEventListener('blur', () => {
-    setOpen(false);
+
+  trigger.addEventListener('click', () => {
+    if (control.classList.contains('is-open')) {
+      setOpen(false);
+    } else {
+      openMenu();
+    }
   });
-  select.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape' || event.key === 'Enter' || event.key === 'Tab') {
+
+  trigger.addEventListener('keydown', (event) => {
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      if (!control.classList.contains('is-open')) {
+        openMenu(true);
+      } else {
+        setActiveIndex(activeIndex + 1);
+        optionButtons[activeIndex]?.focus();
+      }
+    } else if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      if (!control.classList.contains('is-open')) {
+        openMenu(true);
+      } else {
+        setActiveIndex(activeIndex - 1);
+        optionButtons[activeIndex]?.focus();
+      }
+    } else if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      if (control.classList.contains('is-open')) {
+        chooseIndex(activeIndex);
+      } else {
+        openMenu(true);
+      }
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
       setOpen(false);
     }
   });
-  select.addEventListener('pointerdown', () => {
-    if (control.classList.contains('is-open')) {
-      requestAnimationFrame(() => setOpen(false));
-      return;
-    }
-    setOpen(true);
+
+  optionButtons.forEach((button) => {
+    button.addEventListener('click', () => {
+      const index = Number.parseInt(button.dataset.index, 10);
+      chooseIndex(index);
+      trigger.focus();
+    });
+    button.addEventListener('keydown', (event) => {
+      if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        setActiveIndex(activeIndex + 1);
+        optionButtons[activeIndex]?.focus();
+      } else if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        setActiveIndex(activeIndex - 1);
+        optionButtons[activeIndex]?.focus();
+      } else if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        chooseIndex(activeIndex);
+        trigger.focus();
+      } else if (event.key === 'Escape') {
+        event.preventDefault();
+        setOpen(false);
+        trigger.focus();
+      } else if (event.key === 'Tab') {
+        setOpen(false);
+      }
+    });
   });
+
+  document.addEventListener('pointerdown', (event) => {
+    const target = event.target;
+    if (!(target instanceof Node) || !control.contains(target)) {
+      setOpen(false);
+    }
+  });
+
+  shell.prepend(menu);
+  shell.prepend(trigger);
+  updateSelectionUi();
 }
 
 bindSectionCollapseToggles();
-bindSelectArrow(ui.baseShape);
-bindSelectArrow(ui.gradientType);
+bindCustomSelect(ui.baseShape);
+bindCustomSelect(ui.gradientType);
 
 bindRange(ui.growthSpeed, ui.growthSpeedValue, (value) => value.toFixed(2), (value) => {
   simulationSettings.growthSpeed = value;
