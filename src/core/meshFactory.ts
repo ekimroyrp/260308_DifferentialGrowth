@@ -1,4 +1,5 @@
 import { BoxGeometry, BufferGeometry, MathUtils, SphereGeometry, TorusGeometry, Vector3 } from 'three';
+import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { BaseShape } from '../types';
 
 const tempCenter = new Vector3();
@@ -34,18 +35,29 @@ function createBaseGeometry(shape: BaseShape, subdivision: number): BufferGeomet
 }
 
 export function buildShapeGeometry(shape: BaseShape, subdivision = 35): BufferGeometry {
-  const geometry = createBaseGeometry(shape, subdivision);
-  geometry.computeBoundingBox();
-  if (geometry.boundingBox) {
-    geometry.boundingBox.getCenter(tempCenter);
-    geometry.translate(-tempCenter.x, -tempCenter.y, -tempCenter.z);
+  const rawGeometry = createBaseGeometry(shape, subdivision);
+  rawGeometry.computeBoundingBox();
+  if (rawGeometry.boundingBox) {
+    rawGeometry.boundingBox.getCenter(tempCenter);
+    rawGeometry.translate(-tempCenter.x, -tempCenter.y, -tempCenter.z);
   }
 
-  geometry.computeBoundingSphere();
-  const radius = geometry.boundingSphere?.radius ?? 1;
+  rawGeometry.computeBoundingSphere();
+  const radius = rawGeometry.boundingSphere?.radius ?? 1;
   const scale = radius > 1e-6 ? 1.15 / radius : 1;
-  geometry.scale(scale, scale, scale);
-  geometry.computeVertexNormals();
-  geometry.computeBoundingSphere();
-  return geometry;
+  rawGeometry.scale(scale, scale, scale);
+
+  // Remove seam-preserving attributes from primitive generators so shared vertices can be welded.
+  if (rawGeometry.getAttribute('uv')) {
+    rawGeometry.deleteAttribute('uv');
+  }
+  if (rawGeometry.getAttribute('normal')) {
+    rawGeometry.deleteAttribute('normal');
+  }
+
+  const welded = mergeVertices(rawGeometry, 1e-6);
+  rawGeometry.dispose();
+  welded.computeVertexNormals();
+  welded.computeBoundingSphere();
+  return welded;
 }

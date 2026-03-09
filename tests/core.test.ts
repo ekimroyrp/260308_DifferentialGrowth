@@ -26,6 +26,28 @@ const materialSettings: MaterialSettings = {
   exposure: 1.1,
 };
 
+describe('MeshFactory welding', () => {
+  it('welds seam vertices for all base shapes', () => {
+    const shapes = ['sphere', 'torus', 'cube'] as const;
+    for (const shape of shapes) {
+      const geometry = buildShapeGeometry(shape);
+      const position = geometry.getAttribute('position') as BufferAttribute;
+      const seen = new Set<string>();
+      let duplicates = 0;
+      for (let i = 0; i < position.count; i += 1) {
+        const key = `${position.getX(i)},${position.getY(i)},${position.getZ(i)}`;
+        if (seen.has(key)) {
+          duplicates += 1;
+        } else {
+          seen.add(key);
+        }
+      }
+      expect(duplicates).toBe(0);
+      expect(geometry.index).toBeTruthy();
+    }
+  });
+});
+
 describe('DifferentialGrowthEngine mask operations', () => {
   it('paints non-zero mask values and keeps them in [0, 1]', () => {
     const geometry = buildShapeGeometry('sphere');
