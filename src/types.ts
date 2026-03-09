@@ -1,4 +1,13 @@
-export type BaseShape = 'cube' | 'rounded-cube' | 'sphere' | 'quad-sphere' | 'torus';
+export type BaseShape =
+  | 'cube'
+  | 'rounded-cube'
+  | 'pyramid'
+  | 'cone'
+  | 'cylinder'
+  | 'polyhedron'
+  | 'sphere'
+  | 'quad-sphere'
+  | 'torus';
 export type ViewMode = 'curvature' | 'mask';
 export type GradientType = 'curvature' | 'displacement';
 

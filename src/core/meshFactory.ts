@@ -1,4 +1,13 @@
-import { BoxGeometry, BufferGeometry, MathUtils, SphereGeometry, TorusGeometry, Vector3 } from 'three';
+import {
+  BoxGeometry,
+  BufferGeometry,
+  CylinderGeometry,
+  DodecahedronGeometry,
+  MathUtils,
+  SphereGeometry,
+  TorusGeometry,
+  Vector3,
+} from 'three';
 import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { BaseShape } from '../types';
 
@@ -74,6 +83,32 @@ function createBaseGeometry(shape: BaseShape, subdivision: number): BufferGeomet
       );
     case 'rounded-cube':
       return createRoundedCubeGeometry(Math.round(MathUtils.lerp(8, 52, t)));
+    case 'pyramid':
+      return new CylinderGeometry(
+        0,
+        1,
+        1.8,
+        4,
+        Math.round(MathUtils.lerp(1, 40, t)),
+      );
+    case 'cone':
+      return new CylinderGeometry(
+        0,
+        1,
+        1.8,
+        Math.round(MathUtils.lerp(12, 96, t)),
+        Math.round(MathUtils.lerp(1, 40, t)),
+      );
+    case 'cylinder':
+      return new CylinderGeometry(
+        1,
+        1,
+        1.8,
+        Math.round(MathUtils.lerp(12, 96, t)),
+        Math.round(MathUtils.lerp(1, 40, t)),
+      );
+    case 'polyhedron':
+      return new DodecahedronGeometry(1.1, Math.round(MathUtils.lerp(0, 4, t)));
     case 'quad-sphere':
       return createQuadSphereGeometry(Math.round(MathUtils.lerp(8, 56, t)));
     default:

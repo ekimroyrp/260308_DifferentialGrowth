@@ -523,6 +523,11 @@ input[type="range"]::-moz-range-thumb {
   display: none;
 }
 
+#base-shape-menu {
+  max-height: none;
+  overflow-y: visible;
+}
+
 .select-option {
   width: 100%;
   min-height: 28px;

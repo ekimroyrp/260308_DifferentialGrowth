@@ -29,7 +29,17 @@ const materialSettings: MaterialSettings = {
 
 describe('MeshFactory welding', () => {
   it('welds seam vertices for all base shapes', () => {
-    const shapes = ['sphere', 'quad-sphere', 'cube', 'rounded-cube', 'torus'] as const;
+    const shapes = [
+      'sphere',
+      'quad-sphere',
+      'polyhedron',
+      'cube',
+      'rounded-cube',
+      'pyramid',
+      'cone',
+      'cylinder',
+      'torus',
+    ] as const;
     for (const shape of shapes) {
       const geometry = buildShapeGeometry(shape);
       const position = geometry.getAttribute('position') as BufferAttribute;
