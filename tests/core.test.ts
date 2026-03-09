@@ -25,7 +25,6 @@ const materialSettings: MaterialSettings = {
   fresnel: 0.6,
   specular: 0.6,
   bloom: 0,
-  exposure: 1.1,
 };
 
 describe('MeshFactory welding', () => {
@@ -135,6 +134,35 @@ describe('DifferentialGrowthEngine mask operations', () => {
     engine.clearMask();
     const maxAfterClear = Math.max(...(maskAttr.array as Float32Array));
     expect(maxAfterClear).toBe(0);
+  });
+
+  it('applies reversible final smoothing from a paused snapshot', () => {
+    const geometry = buildShapeGeometry('sphere');
+    const engine = new DifferentialGrowthEngine(geometry, growthSettings, 654);
+    const source = engine.getPositionSnapshot();
+
+    engine.applyFinalSmoothingFromSnapshot(source, 0.85);
+    const smoothed = (engine.getGeometry().getAttribute('position') as BufferAttribute).array as Float32Array;
+
+    let maxSmoothedDelta = 0;
+    for (let i = 0; i < source.length; i += 1) {
+      const delta = Math.abs(smoothed[i] - source[i]);
+      if (delta > maxSmoothedDelta) {
+        maxSmoothedDelta = delta;
+      }
+    }
+    expect(maxSmoothedDelta).toBeGreaterThan(1e-6);
+
+    engine.applyFinalSmoothingFromSnapshot(source, 0);
+    const restored = (engine.getGeometry().getAttribute('position') as BufferAttribute).array as Float32Array;
+    let maxRestoreDelta = 0;
+    for (let i = 0; i < source.length; i += 1) {
+      const delta = Math.abs(restored[i] - source[i]);
+      if (delta > maxRestoreDelta) {
+        maxRestoreDelta = delta;
+      }
+    }
+    expect(maxRestoreDelta).toBeLessThan(1e-9);
   });
 
   it('black mask suppresses vertex movement in painted region during growth step', () => {

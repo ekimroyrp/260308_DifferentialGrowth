@@ -37,7 +37,6 @@ export type MaterialSettings = {
   fresnel: number;
   specular: number;
   bloom: number;
-  exposure: number;
 };
 
 export type AppState = {

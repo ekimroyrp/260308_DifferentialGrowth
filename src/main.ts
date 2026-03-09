@@ -71,6 +71,8 @@ type UiRefs = {
   repulsionValue: HTMLSpanElement;
   smoothing: HTMLInputElement;
   smoothingValue: HTMLSpanElement;
+  finalSmoothing: HTMLInputElement;
+  finalSmoothingValue: HTMLSpanElement;
   shapeRetention: HTMLInputElement;
   shapeRetentionValue: HTMLSpanElement;
   maxVertices: HTMLInputElement;
@@ -90,8 +92,6 @@ type UiRefs = {
   specularValue: HTMLSpanElement;
   bloom: HTMLInputElement;
   bloomValue: HTMLSpanElement;
-  exposure: HTMLInputElement;
-  exposureValue: HTMLSpanElement;
   overlay: SVGSVGElement;
   brushCircle: SVGCircleElement;
   falloffCircle: SVGCircleElement;
@@ -187,6 +187,8 @@ const ui: UiRefs = {
   repulsionValue: requiredElement('repulsion-value', isSpan),
   smoothing: requiredElement('smoothing', isInput),
   smoothingValue: requiredElement('smoothing-value', isSpan),
+  finalSmoothing: requiredElement('final-smoothing', isInput),
+  finalSmoothingValue: requiredElement('final-smoothing-value', isSpan),
   shapeRetention: requiredElement('shape-retention', isInput),
   shapeRetentionValue: requiredElement('shape-retention-value', isSpan),
   maxVertices: requiredElement('max-vertices', isInput),
@@ -206,8 +208,6 @@ const ui: UiRefs = {
   specularValue: requiredElement('specular-value', isSpan),
   bloom: requiredElement('bloom', isInput),
   bloomValue: requiredElement('bloom-value', isSpan),
-  exposure: requiredElement('exposure', isInput),
-  exposureValue: requiredElement('exposure-value', isSpan),
   overlay: requiredElement('brush-overlay', isSvg),
   brushCircle: requiredElement('brush-circle', isSvgCircle),
   falloffCircle: requiredElement('falloff-circle', isSvgCircle),
@@ -256,7 +256,6 @@ const materialSettings: MaterialSettings = {
   fresnel: Number.parseFloat(ui.fresnel.value),
   specular: Number.parseFloat(ui.specular.value),
   bloom: Number.parseFloat(ui.bloom.value),
-  exposure: Number.parseFloat(ui.exposure.value),
 };
 
 const appState: AppState = {
@@ -264,13 +263,15 @@ const appState: AppState = {
   viewMode: 'curvature',
 };
 
+let finalSmoothingAmount = Number.parseFloat(ui.finalSmoothing.value);
+let finalSmoothingSource: Float32Array | null = null;
+
 const renderer = new WebGLRenderer({ antialias: true, canvas });
 const getPixelRatio = (): number => Math.min(window.devicePixelRatio * 1.5, 3);
 renderer.setPixelRatio(getPixelRatio());
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.outputColorSpace = SRGBColorSpace;
 renderer.toneMapping = ACESFilmicToneMapping;
-renderer.toneMappingExposure = materialSettings.exposure;
 
 const scene = new Scene();
 scene.background = new Color(0x111622);
@@ -369,8 +370,8 @@ function setOverlayVisible(visible: boolean): void {
 }
 
 function setOverlayModeColors(eraseMode: boolean): void {
-  const innerColor = eraseMode ? 'rgba(255, 72, 72, 0.98)' : 'rgba(80, 235, 110, 0.98)';
-  const outerColor = eraseMode ? 'rgba(255, 72, 72, 0.72)' : 'rgba(80, 235, 110, 0.72)';
+  const innerColor = eraseMode ? 'rgba(255, 72, 72, 0.98)' : 'rgba(102, 170, 255, 0.98)';
+  const outerColor = eraseMode ? 'rgba(255, 72, 72, 0.72)' : 'rgba(102, 170, 255, 0.72)';
   ui.brushCircle.style.stroke = innerColor;
   ui.brushDot.style.fill = innerColor;
   ui.falloffCircle.style.stroke = outerColor;
@@ -468,6 +469,28 @@ function eraseAt(hitPoint: Vector3): void {
   engine.eraseMask(tempLocal, shapeSettings.brushRadius, shapeSettings.falloffOffset);
 }
 
+function syncGeometryWithEngine(): void {
+  const activeGeometry = engine.getGeometry();
+  if (mesh.geometry === activeGeometry) {
+    return;
+  }
+  const previous = mesh.geometry;
+  mesh.geometry = activeGeometry;
+  wireframeMesh.geometry = activeGeometry;
+  previous.dispose();
+}
+
+function applyFinalSmoothingPreview(): void {
+  if (appState.running) {
+    return;
+  }
+  if (!finalSmoothingSource) {
+    finalSmoothingSource = engine.getPositionSnapshot();
+  }
+  engine.applyFinalSmoothingFromSnapshot(finalSmoothingSource, finalSmoothingAmount);
+  syncGeometryWithEngine();
+}
+
 function setViewMode(mode: ViewMode): void {
   appState.viewMode = mode;
   materialController.setViewMode(mode);
@@ -475,6 +498,11 @@ function setViewMode(mode: ViewMode): void {
 }
 
 function startSimulation(): void {
+  if (finalSmoothingSource) {
+    engine.applyFinalSmoothingFromSnapshot(finalSmoothingSource, 0);
+    syncGeometryWithEngine();
+  }
+  finalSmoothingSource = null;
   appState.running = true;
   setViewMode('curvature');
   syncUiState();
@@ -482,11 +510,17 @@ function startSimulation(): void {
 
 function stopSimulation(): void {
   appState.running = false;
+  finalSmoothingSource = engine.getPositionSnapshot();
+  applyFinalSmoothingPreview();
   syncUiState();
 }
 
 function enterMaskMode(): void {
   appState.running = false;
+  if (!finalSmoothingSource) {
+    finalSmoothingSource = engine.getPositionSnapshot();
+  }
+  applyFinalSmoothingPreview();
   setViewMode('mask');
   syncUiState();
   refreshMaskOverlay();
@@ -506,6 +540,13 @@ function resetSimulation(): void {
   previousGeometry.dispose();
   engine.reseed(simulationSettings.seed);
   engine.setGeometry(nextGeometry);
+  syncGeometryWithEngine();
+  if (appState.running) {
+    finalSmoothingSource = null;
+  } else {
+    finalSmoothingSource = engine.getPositionSnapshot();
+    applyFinalSmoothingPreview();
+  }
   controls.update();
   setOverlayVisible(false);
   if (appState.viewMode === 'mask') {
@@ -516,7 +557,7 @@ function resetSimulation(): void {
 }
 
 function syncUiState(): void {
-  ui.start.textContent = appState.running ? 'Stop' : 'Start';
+  ui.start.textContent = appState.running ? 'Pause' : 'Start';
   ui.start.classList.toggle('is-start-state', !appState.running);
   ui.start.classList.toggle('is-stop-state', appState.running);
   ui.maskMode.textContent = appState.viewMode === 'mask' ? 'Exit Mask Mode' : 'Enter Mask Mode';
@@ -568,6 +609,112 @@ function bindRange(
   format: (value: number) => string,
   onInput: (value: number) => void,
 ): void {
+  const stepDecimals = (stepValue: string): number => {
+    if (!stepValue || stepValue === 'any') {
+      return 6;
+    }
+    const normalized = stepValue.toLowerCase();
+    const expIndex = normalized.indexOf('e-');
+    if (expIndex >= 0) {
+      const expDigits = Number.parseInt(normalized.slice(expIndex + 2), 10);
+      return Number.isFinite(expDigits) ? expDigits : 6;
+    }
+    const dotIndex = stepValue.indexOf('.');
+    return dotIndex >= 0 ? stepValue.length - dotIndex - 1 : 0;
+  };
+
+  const commitManualValue = (rawValue: string): void => {
+    let next = Number.parseFloat(rawValue);
+    if (!Number.isFinite(next)) {
+      update();
+      return;
+    }
+
+    const min = Number.parseFloat(input.min);
+    const max = Number.parseFloat(input.max);
+    if (Number.isFinite(min)) {
+      next = Math.max(min, next);
+    }
+    if (Number.isFinite(max)) {
+      next = Math.min(max, next);
+    }
+
+    const parsedStep = Number.parseFloat(input.step);
+    if (Number.isFinite(parsedStep) && parsedStep > 0) {
+      const base = Number.isFinite(min) ? min : 0;
+      next = base + Math.round((next - base) / parsedStep) * parsedStep;
+      if (Number.isFinite(min)) {
+        next = Math.max(min, next);
+      }
+      if (Number.isFinite(max)) {
+        next = Math.min(max, next);
+      }
+    }
+
+    input.value = next.toFixed(stepDecimals(input.step));
+    update();
+  };
+
+  let isManualEditing = false;
+  const beginManualEdit = (): void => {
+    if (isManualEditing) {
+      return;
+    }
+    isManualEditing = true;
+
+    const editor = document.createElement('input');
+    editor.type = 'number';
+    editor.className = 'value-editor';
+    editor.value = input.value;
+    if (input.min) {
+      editor.min = input.min;
+    }
+    if (input.max) {
+      editor.max = input.max;
+    }
+    if (input.step) {
+      editor.step = input.step;
+    }
+
+    valueLabel.replaceWith(editor);
+    editor.focus();
+    editor.select();
+
+    let finalized = false;
+    const finish = (commit: boolean): void => {
+      if (finalized) {
+        return;
+      }
+      finalized = true;
+      const submitted = editor.value;
+      editor.replaceWith(valueLabel);
+      isManualEditing = false;
+      if (commit) {
+        commitManualValue(submitted);
+      } else {
+        update();
+      }
+    };
+
+    editor.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        finish(true);
+      } else if (event.key === 'Escape') {
+        event.preventDefault();
+        finish(false);
+      }
+    });
+    editor.addEventListener('blur', () => {
+      finish(true);
+    });
+  };
+
+  valueLabel.addEventListener('click', (event) => {
+    event.stopPropagation();
+    beginManualEdit();
+  });
+
   const update = (): void => {
     const value = Number.parseFloat(input.value);
     valueLabel.textContent = format(value);
@@ -684,6 +831,12 @@ bindRange(ui.smoothing, ui.smoothingValue, (value) => value.toFixed(2), (value) 
   growthSettings.smoothing = value;
   engine.setGrowthSettings(growthSettings);
 });
+bindRange(ui.finalSmoothing, ui.finalSmoothingValue, (value) => value.toFixed(2), (value) => {
+  finalSmoothingAmount = value;
+  if (!appState.running) {
+    applyFinalSmoothingPreview();
+  }
+});
 bindRange(ui.shapeRetention, ui.shapeRetentionValue, (value) => value.toFixed(2), (value) => {
   growthSettings.shapeRetention = value;
   engine.setGrowthSettings(growthSettings);
@@ -715,10 +868,6 @@ bindRange(ui.specular, ui.specularValue, (value) => value.toFixed(2), (value) =>
 bindRange(ui.bloom, ui.bloomValue, (value) => value.toFixed(2), (value) => {
   materialSettings.bloom = value;
   bloomPass.strength = value;
-});
-bindRange(ui.exposure, ui.exposureValue, (value) => value.toFixed(2), (value) => {
-  materialSettings.exposure = value;
-  renderer.toneMappingExposure = value;
 });
 
 ui.gradientStart.addEventListener('input', () => {
@@ -937,13 +1086,7 @@ renderer.setAnimationLoop((now) => {
   controls.update();
   if (appState.running) {
     engine.step(dt, simulationSettings.growthSpeed, simulationSettings.seedInfluence);
-    const activeGeometry = engine.getGeometry();
-    if (mesh.geometry !== activeGeometry) {
-      const previous = mesh.geometry;
-      mesh.geometry = activeGeometry;
-      wireframeMesh.geometry = activeGeometry;
-      previous.dispose();
-    }
+    syncGeometryWithEngine();
   }
 
   composer.render();

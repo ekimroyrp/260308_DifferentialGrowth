@@ -96,6 +96,31 @@ export class DifferentialGrowthEngine {
     this.updateCurvatureAttribute();
   }
 
+  getPositionSnapshot(): Float32Array {
+    return Float32Array.from(this.positionAttr.array as Float32Array);
+  }
+
+  applyFinalSmoothingFromSnapshot(sourcePositions: Float32Array, strength: number): void {
+    const positionArray = this.positionAttr.array as Float32Array;
+    if (sourcePositions.length !== positionArray.length) {
+      return;
+    }
+
+    positionArray.set(sourcePositions);
+    this.positionAttr.needsUpdate = true;
+
+    const clampedStrength = MathUtils.clamp(strength, 0, 1);
+    if (clampedStrength > 0) {
+      const iterations = Math.max(1, Math.round(1 + clampedStrength * 10));
+      const amount = MathUtils.clamp(0.03 + clampedStrength * 0.42, 0, 0.45);
+      this.applySurfaceSmoothing(iterations, amount, false);
+    }
+
+    this.geometry.computeVertexNormals();
+    this.normalAttr.needsUpdate = true;
+    this.updateCurvatureAttribute();
+  }
+
   resetToBase(clearMask = true): void {
     const positionArray = this.positionAttr.array as Float32Array;
     positionArray.set(this.basePositions);
@@ -468,7 +493,7 @@ export class DifferentialGrowthEngine {
     }
   }
 
-  private applySurfaceSmoothing(iterations: number, amount: number): void {
+  private applySurfaceSmoothing(iterations: number, amount: number, respectMask = true): void {
     if (iterations <= 0 || amount <= 0) {
       return;
     }
@@ -503,7 +528,7 @@ export class DifferentialGrowthEngine {
         avgX *= inv;
         avgY *= inv;
         avgZ *= inv;
-        const inhibition = MathUtils.clamp(maskArray[i], 0, 1);
+        const inhibition = respectMask ? MathUtils.clamp(maskArray[i], 0, 1) : 0;
         const localBlend = blend * (1 - inhibition);
         const oneMinus = 1 - localBlend;
         this.smoothWork[index] = positionArray[index] * oneMinus + avgX * localBlend;

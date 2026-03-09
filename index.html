@@ -179,18 +179,10 @@
 
             <label class="control">
               <div class="control-row">
-                <span>Repulsion</span>
+                <span>Repulsion Force</span>
                 <span id="repulsion-value">0.62</span>
               </div>
               <input type="range" id="repulsion" min="0" max="1" step="0.01" value="0.62" />
-            </label>
-
-            <label class="control">
-              <div class="control-row">
-                <span>Smoothing</span>
-                <span id="smoothing-value">1.00</span>
-              </div>
-              <input type="range" id="smoothing" min="0" max="1" step="0.01" value="1" />
             </label>
 
             <label class="control">
@@ -207,6 +199,22 @@
                 <span id="max-vertices-value">50000</span>
               </div>
               <input type="range" id="max-vertices" min="10000" max="120000" step="1000" value="50000" />
+            </label>
+
+            <label class="control">
+              <div class="control-row">
+                <span>Iteration Smoothing</span>
+                <span id="smoothing-value">1.00</span>
+              </div>
+              <input type="range" id="smoothing" min="0" max="1" step="0.01" value="1" />
+            </label>
+
+            <label class="control">
+              <div class="control-row">
+                <span>Final Smoothing</span>
+                <span id="final-smoothing-value">0.00</span>
+              </div>
+              <input type="range" id="final-smoothing" min="0" max="1" step="0.01" value="0" />
             </label>
 
           </div>
@@ -292,13 +300,6 @@
               <input type="range" id="bloom" min="0" max="2" step="0.01" value="0.05" />
             </label>
 
-            <label class="control">
-              <div class="control-row">
-                <span>Exposure</span>
-                <span id="exposure-value">1.10</span>
-              </div>
-              <input type="range" id="exposure" min="0.5" max="2" step="0.01" value="1.1" />
-            </label>
           </div>
         </section>
       </div>
