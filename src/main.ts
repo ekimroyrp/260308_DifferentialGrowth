@@ -122,11 +122,27 @@ type UiRefs = {
 
 const FIXED_MASK_BLUR_STRENGTH = 0.35;
 const MAX_TIMELINE_SNAPSHOTS = 240;
+const MAX_HISTORY_STATES = 100;
 type MaskAction =
   | { kind: 'paint'; point: Vector3; radius: number; falloffOffset: number }
   | { kind: 'erase'; point: Vector3; radius: number; falloffOffset: number }
   | { kind: 'blur'; strength: number };
 type TimelineEntry = { step: number; snapshot: DifferentialGrowthSnapshot };
+type HistorySnapshot = {
+  simulationSettings: SimulationSettings;
+  shapeSettings: ShapeSettings;
+  growthSettings: GrowthSettings;
+  materialSettings: MaterialSettings;
+  appState: AppState;
+  finalSmoothingAmount: number;
+  finalSmoothingSource: Float32Array | null;
+  maskActions: MaskAction[];
+  engineSnapshot: DifferentialGrowthSnapshot;
+};
+type HistoryEntry = {
+  before: HistorySnapshot;
+  after: HistorySnapshot;
+};
 
 function revealUiWhenStyled(maxWaitMs = 1500): void {
   const start = performance.now();
@@ -427,6 +443,12 @@ let currentTimelineStep = 0;
 let timelineSliderSyncing = false;
 let timelineRangeBound = false;
 let timelineStepDirty = false;
+const undoHistory: HistoryEntry[] = [];
+const redoHistory: HistoryEntry[] = [];
+let historyPendingBefore: HistorySnapshot | null = null;
+let isApplyingHistory = false;
+let suppressRangeHistory = false;
+let maskStrokeHistoryActive = false;
 resetTimelineToCurrentState();
 
 function syncWireframeVisibility(): void {
@@ -596,6 +618,278 @@ function replayMaskActions(): void {
 
 function clearMaskActionHistory(): void {
   maskActions.length = 0;
+}
+
+function cloneMaskActions(actions: MaskAction[]): MaskAction[] {
+  return actions.map((action) => {
+    if (action.kind === 'blur') {
+      return { kind: 'blur', strength: action.strength };
+    }
+    return {
+      kind: action.kind,
+      point: action.point.clone(),
+      radius: action.radius,
+      falloffOffset: action.falloffOffset,
+    };
+  });
+}
+
+function captureHistorySnapshot(): HistorySnapshot {
+  return {
+    simulationSettings: { ...simulationSettings },
+    shapeSettings: { ...shapeSettings },
+    growthSettings: { ...growthSettings },
+    materialSettings: { ...materialSettings },
+    appState: { ...appState },
+    finalSmoothingAmount,
+    finalSmoothingSource: finalSmoothingSource ? Float32Array.from(finalSmoothingSource) : null,
+    maskActions: cloneMaskActions(maskActions),
+    engineSnapshot: engine.exportSnapshot(),
+  };
+}
+
+function disposeHistorySnapshot(snapshot: HistorySnapshot): void {
+  disposeSnapshot(snapshot.engineSnapshot);
+}
+
+function disposeHistoryEntry(entry: HistoryEntry): void {
+  disposeHistorySnapshot(entry.before);
+  disposeHistorySnapshot(entry.after);
+}
+
+function clearRedoHistory(): void {
+  while (redoHistory.length > 0) {
+    const entry = redoHistory.pop();
+    if (entry) {
+      disposeHistoryEntry(entry);
+    }
+  }
+}
+
+function pushUndoHistory(entry: HistoryEntry): void {
+  undoHistory.push(entry);
+  while (undoHistory.length > MAX_HISTORY_STATES) {
+    const removed = undoHistory.shift();
+    if (removed) {
+      disposeHistoryEntry(removed);
+    }
+  }
+  clearRedoHistory();
+}
+
+function beginHistoryCapture(): void {
+  if (isApplyingHistory || suppressRangeHistory || historyPendingBefore) {
+    return;
+  }
+  historyPendingBefore = captureHistorySnapshot();
+}
+
+function finishHistoryCapture(): void {
+  if (isApplyingHistory || !historyPendingBefore) {
+    return;
+  }
+  const after = captureHistorySnapshot();
+  pushUndoHistory({
+    before: historyPendingBefore,
+    after,
+  });
+  historyPendingBefore = null;
+}
+
+function recordHistoryAction(action: () => void): void {
+  if (isApplyingHistory) {
+    action();
+    return;
+  }
+  if (historyPendingBefore) {
+    finishHistoryCapture();
+  }
+  const before = captureHistorySnapshot();
+  action();
+  const after = captureHistorySnapshot();
+  pushUndoHistory({ before, after });
+}
+
+function refreshUiFromCurrentState(): void {
+  const dispatchInput = (input: HTMLInputElement): void => {
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  };
+  const dispatchSelectChange = (select: HTMLSelectElement): void => {
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+  };
+
+  ui.growthSpeed.value = `${simulationSettings.growthSpeed}`;
+  dispatchInput(ui.growthSpeed);
+  ui.seed.value = `${simulationSettings.seed}`;
+  dispatchInput(ui.seed);
+  ui.seedInfluence.value = `${simulationSettings.seedInfluence}`;
+  dispatchInput(ui.seedInfluence);
+
+  ui.baseShape.value = shapeSettings.baseShape;
+  dispatchSelectChange(ui.baseShape);
+  ui.transformOrder.value = shapeSettings.transformOrder;
+  dispatchSelectChange(ui.transformOrder);
+  ui.subdivision.value = `${shapeSettings.subdivision}`;
+  dispatchInput(ui.subdivision);
+  ui.scaleX.value = `${shapeSettings.scaleX}`;
+  dispatchInput(ui.scaleX);
+  ui.scaleY.value = `${shapeSettings.scaleY}`;
+  dispatchInput(ui.scaleY);
+  ui.scaleZ.value = `${shapeSettings.scaleZ}`;
+  dispatchInput(ui.scaleZ);
+  ui.rotateX.value = `${shapeSettings.rotateX}`;
+  dispatchInput(ui.rotateX);
+  ui.rotateY.value = `${shapeSettings.rotateY}`;
+  dispatchInput(ui.rotateY);
+  ui.rotateZ.value = `${shapeSettings.rotateZ}`;
+  dispatchInput(ui.rotateZ);
+  ui.showWireframe.checked = shapeSettings.showWireframe;
+  ui.showMesh.checked = shapeSettings.showMesh;
+  ui.brushRadius.value = `${shapeSettings.brushRadius}`;
+  dispatchInput(ui.brushRadius);
+  ui.falloffOffset.value = `${shapeSettings.falloffOffset}`;
+  dispatchInput(ui.falloffOffset);
+
+  ui.growthStep.value = `${growthSettings.growthStep}`;
+  dispatchInput(ui.growthStep);
+  ui.targetEdgeLength.value = `${growthSettings.targetEdgeLength}`;
+  dispatchInput(ui.targetEdgeLength);
+  ui.splitThreshold.value = `${growthSettings.splitThreshold}`;
+  dispatchInput(ui.splitThreshold);
+  ui.repulsion.value = `${growthSettings.repulsion}`;
+  dispatchInput(ui.repulsion);
+  ui.smoothing.value = `${growthSettings.smoothing}`;
+  dispatchInput(ui.smoothing);
+  ui.finalSmoothing.value = `${finalSmoothingAmount}`;
+  dispatchInput(ui.finalSmoothing);
+  ui.shapeRetention.value = `${growthSettings.shapeRetention}`;
+  dispatchInput(ui.shapeRetention);
+  ui.maxVertices.value = `${growthSettings.maxVertices}`;
+  dispatchInput(ui.maxVertices);
+
+  ui.gradientType.value = materialSettings.gradientType;
+  dispatchSelectChange(ui.gradientType);
+  ui.gradientStart.value = materialSettings.gradientStart;
+  ui.gradientEnd.value = materialSettings.gradientEnd;
+  ui.curvatureContrast.value = `${materialSettings.curvatureContrast}`;
+  dispatchInput(ui.curvatureContrast);
+  ui.curvatureBias.value = `${materialSettings.curvatureBias}`;
+  dispatchInput(ui.curvatureBias);
+  ui.gradientBlur.value = `${materialSettings.gradientBlur}`;
+  dispatchInput(ui.gradientBlur);
+  ui.fresnel.value = `${materialSettings.fresnel}`;
+  dispatchInput(ui.fresnel);
+  ui.specular.value = `${materialSettings.specular}`;
+  dispatchInput(ui.specular);
+  ui.bloom.value = `${materialSettings.bloom}`;
+  dispatchInput(ui.bloom);
+
+  mesh.visible = shapeSettings.showMesh;
+  syncWireframeVisibility();
+}
+
+function applyHistorySnapshot(snapshot: HistorySnapshot): void {
+  isApplyingHistory = true;
+  suppressRangeHistory = true;
+  try {
+    simulationSettings.growthSpeed = snapshot.simulationSettings.growthSpeed;
+    simulationSettings.seed = snapshot.simulationSettings.seed;
+    simulationSettings.seedInfluence = snapshot.simulationSettings.seedInfluence;
+
+    shapeSettings.baseShape = snapshot.shapeSettings.baseShape;
+    shapeSettings.subdivision = snapshot.shapeSettings.subdivision;
+    shapeSettings.transformOrder = snapshot.shapeSettings.transformOrder;
+    shapeSettings.scaleX = snapshot.shapeSettings.scaleX;
+    shapeSettings.scaleY = snapshot.shapeSettings.scaleY;
+    shapeSettings.scaleZ = snapshot.shapeSettings.scaleZ;
+    shapeSettings.rotateX = snapshot.shapeSettings.rotateX;
+    shapeSettings.rotateY = snapshot.shapeSettings.rotateY;
+    shapeSettings.rotateZ = snapshot.shapeSettings.rotateZ;
+    shapeSettings.showWireframe = snapshot.shapeSettings.showWireframe;
+    shapeSettings.showMesh = snapshot.shapeSettings.showMesh;
+    shapeSettings.brushRadius = snapshot.shapeSettings.brushRadius;
+    shapeSettings.falloffOffset = snapshot.shapeSettings.falloffOffset;
+
+    growthSettings.growthStep = snapshot.growthSettings.growthStep;
+    growthSettings.targetEdgeLength = snapshot.growthSettings.targetEdgeLength;
+    growthSettings.splitThreshold = snapshot.growthSettings.splitThreshold;
+    growthSettings.repulsion = snapshot.growthSettings.repulsion;
+    growthSettings.smoothing = snapshot.growthSettings.smoothing;
+    growthSettings.shapeRetention = snapshot.growthSettings.shapeRetention;
+    growthSettings.maxVertices = snapshot.growthSettings.maxVertices;
+
+    materialSettings.gradientType = snapshot.materialSettings.gradientType;
+    materialSettings.gradientStart = snapshot.materialSettings.gradientStart;
+    materialSettings.gradientEnd = snapshot.materialSettings.gradientEnd;
+    materialSettings.curvatureContrast = snapshot.materialSettings.curvatureContrast;
+    materialSettings.curvatureBias = snapshot.materialSettings.curvatureBias;
+    materialSettings.gradientBlur = snapshot.materialSettings.gradientBlur;
+    materialSettings.fresnel = snapshot.materialSettings.fresnel;
+    materialSettings.specular = snapshot.materialSettings.specular;
+    materialSettings.bloom = snapshot.materialSettings.bloom;
+
+    finalSmoothingAmount = snapshot.finalSmoothingAmount;
+    finalSmoothingSource = snapshot.finalSmoothingSource ? Float32Array.from(snapshot.finalSmoothingSource) : null;
+    maskActions.length = 0;
+    maskActions.push(...cloneMaskActions(snapshot.maskActions));
+
+    engine.importSnapshot(snapshot.engineSnapshot);
+    engine.reseed(simulationSettings.seed);
+    engine.setGrowthSettings(growthSettings);
+    engine.setGradientBlur(materialSettings.gradientBlur);
+    materialController.setMaterialSettings(materialSettings);
+    bloomPass.strength = materialSettings.bloom;
+    syncGeometryWithEngine();
+
+    appState.running = snapshot.appState.running;
+    setViewMode(snapshot.appState.viewMode);
+    refreshUiFromCurrentState();
+    resetTimelineToCurrentState();
+    syncUiState();
+    controls.update();
+    if (appState.viewMode === 'mask') {
+      refreshMaskOverlay();
+    }
+  } finally {
+    suppressRangeHistory = false;
+    isApplyingHistory = false;
+  }
+}
+
+function undoHistoryStep(): void {
+  if (historyPendingBefore) {
+    finishHistoryCapture();
+  }
+  const entry = undoHistory.pop();
+  if (!entry) {
+    return;
+  }
+  applyHistorySnapshot(entry.before);
+  redoHistory.push(entry);
+  while (redoHistory.length > MAX_HISTORY_STATES) {
+    const removed = redoHistory.shift();
+    if (removed) {
+      disposeHistoryEntry(removed);
+    }
+  }
+}
+
+function redoHistoryStep(): void {
+  if (historyPendingBefore) {
+    finishHistoryCapture();
+  }
+  const entry = redoHistory.pop();
+  if (!entry) {
+    return;
+  }
+  applyHistorySnapshot(entry.after);
+  undoHistory.push(entry);
+  while (undoHistory.length > MAX_HISTORY_STATES) {
+    const removed = undoHistory.shift();
+    if (removed) {
+      disposeHistoryEntry(removed);
+    }
+  }
 }
 
 function clamp01(value: number): number {
@@ -1040,6 +1334,24 @@ function bindRange(
   format: (value: number) => string,
   onInput: (value: number) => void,
 ): void {
+  let hasInitialized = false;
+  let rangeHistoryActive = false;
+
+  const beginRangeHistory = (): void => {
+    if (hasInitialized && !isApplyingHistory && !suppressRangeHistory && !rangeHistoryActive) {
+      beginHistoryCapture();
+      rangeHistoryActive = true;
+    }
+  };
+
+  const finishRangeHistory = (): void => {
+    if (!rangeHistoryActive) {
+      return;
+    }
+    finishHistoryCapture();
+    rangeHistoryActive = false;
+  };
+
   const stepDecimals = (stepValue: string): number => {
     if (!stepValue || stepValue === 'any') {
       return 6;
@@ -1055,9 +1367,11 @@ function bindRange(
   };
 
   const commitManualValue = (rawValue: string): void => {
+    beginRangeHistory();
     let next = Number.parseFloat(rawValue);
     if (!Number.isFinite(next)) {
       update();
+      finishRangeHistory();
       return;
     }
 
@@ -1084,6 +1398,7 @@ function bindRange(
 
     input.value = next.toFixed(stepDecimals(input.step));
     update();
+    finishRangeHistory();
   };
 
   let isManualEditing = false;
@@ -1147,12 +1462,24 @@ function bindRange(
   });
 
   const update = (): void => {
+    beginRangeHistory();
     const value = Number.parseFloat(input.value);
     valueLabel.textContent = format(value);
     updateRangeProgress(input);
-    onInput(value);
+    if (!isApplyingHistory) {
+      onInput(value);
+    }
+    hasInitialized = true;
   };
   input.addEventListener('input', update);
+  input.addEventListener('change', finishRangeHistory);
+  input.addEventListener('blur', finishRangeHistory);
+  input.addEventListener('pointerup', finishRangeHistory);
+  input.addEventListener('keyup', (event) => {
+    if (event.key.startsWith('Arrow') || event.key === 'PageUp' || event.key === 'PageDown') {
+      finishRangeHistory();
+    }
+  });
   update();
 }
 
@@ -1504,17 +1831,32 @@ ui.gradientEnd.addEventListener('input', () => {
   materialController.setMaterialSettings(materialSettings);
 });
 ui.gradientType.addEventListener('change', () => {
-  materialSettings.gradientType = ui.gradientType.value as GradientType;
-  materialController.setMaterialSettings(materialSettings);
+  if (isApplyingHistory) {
+    return;
+  }
+  recordHistoryAction(() => {
+    materialSettings.gradientType = ui.gradientType.value as GradientType;
+    materialController.setMaterialSettings(materialSettings);
+  });
 });
 
 ui.baseShape.addEventListener('change', () => {
-  shapeSettings.baseShape = ui.baseShape.value as BaseShape;
-  resetSimulation(false);
+  if (isApplyingHistory) {
+    return;
+  }
+  recordHistoryAction(() => {
+    shapeSettings.baseShape = ui.baseShape.value as BaseShape;
+    resetSimulation(false);
+  });
 });
 ui.transformOrder.addEventListener('change', () => {
-  shapeSettings.transformOrder = ui.transformOrder.value as TransformOrder;
-  resetSimulation(false);
+  if (isApplyingHistory) {
+    return;
+  }
+  recordHistoryAction(() => {
+    shapeSettings.transformOrder = ui.transformOrder.value as TransformOrder;
+    resetSimulation(false);
+  });
 });
 ui.subdivision.addEventListener('pointerdown', () => {
   setSubdivisionWireframePreview(true);
@@ -1535,32 +1877,55 @@ ui.subdivision.addEventListener('blur', () => {
   setSubdivisionWireframePreview(false);
 });
 ui.showWireframe.addEventListener('change', () => {
-  shapeSettings.showWireframe = ui.showWireframe.checked;
-  syncWireframeVisibility();
+  if (isApplyingHistory) {
+    return;
+  }
+  recordHistoryAction(() => {
+    shapeSettings.showWireframe = ui.showWireframe.checked;
+    syncWireframeVisibility();
+  });
 });
 ui.showMesh.addEventListener('change', () => {
-  shapeSettings.showMesh = ui.showMesh.checked;
-  mesh.visible = shapeSettings.showMesh;
+  if (isApplyingHistory) {
+    return;
+  }
+  recordHistoryAction(() => {
+    shapeSettings.showMesh = ui.showMesh.checked;
+    mesh.visible = shapeSettings.showMesh;
+  });
 });
 
 const setRangeValue = (input: HTMLInputElement, value: number): void => {
+  const previousSuppress = suppressRangeHistory;
+  suppressRangeHistory = true;
   input.value = `${value}`;
   input.dispatchEvent(new Event('input', { bubbles: true }));
+  suppressRangeHistory = previousSuppress;
 };
 
 ui.resetSubdivision.addEventListener('click', () => {
-  const defaultSubdivision = Number.parseFloat(ui.subdivision.defaultValue);
-  setRangeValue(ui.subdivision, Number.isFinite(defaultSubdivision) ? defaultSubdivision : 1);
-  setSubdivisionWireframePreview(false);
+  if (isApplyingHistory) {
+    return;
+  }
+  recordHistoryAction(() => {
+    const defaultSubdivision = Number.parseFloat(ui.subdivision.defaultValue);
+    setRangeValue(ui.subdivision, Number.isFinite(defaultSubdivision) ? defaultSubdivision : 1);
+    setSubdivisionWireframePreview(false);
+  });
 });
 
 ui.resetTransform.addEventListener('click', () => {
-  setRangeValue(ui.scaleX, 1);
-  setRangeValue(ui.scaleY, 1);
-  setRangeValue(ui.scaleZ, 1);
-  setRangeValue(ui.rotateX, 0);
-  setRangeValue(ui.rotateY, 0);
-  setRangeValue(ui.rotateZ, 0);
+  if (isApplyingHistory) {
+    return;
+  }
+  recordHistoryAction(() => {
+    setRangeValue(ui.scaleX, 1);
+    setRangeValue(ui.scaleY, 1);
+    setRangeValue(ui.scaleZ, 1);
+    setRangeValue(ui.rotateX, 0);
+    setRangeValue(ui.rotateY, 0);
+    setRangeValue(ui.rotateZ, 0);
+  });
 });
 
 ui.exportObj.addEventListener('click', () => {
@@ -1576,43 +1941,68 @@ ui.exportGlb.addEventListener('click', () => {
 });
 
 ui.start.addEventListener('click', () => {
-  if (appState.running) {
-    stopSimulation();
-  } else {
-    startSimulation();
+  if (isApplyingHistory) {
+    return;
   }
+  recordHistoryAction(() => {
+    if (appState.running) {
+      stopSimulation();
+    } else {
+      startSimulation();
+    }
+  });
 });
 
 ui.maskMode.addEventListener('click', () => {
-  if (appState.viewMode === 'mask') {
-    exitMaskMode();
-  } else {
-    enterMaskMode();
+  if (isApplyingHistory) {
+    return;
   }
+  recordHistoryAction(() => {
+    if (appState.viewMode === 'mask') {
+      exitMaskMode();
+    } else {
+      enterMaskMode();
+    }
+  });
 });
 
 ui.reset.addEventListener('click', () => {
-  resetSimulation();
+  if (isApplyingHistory) {
+    return;
+  }
+  recordHistoryAction(() => {
+    resetSimulation();
+  });
 });
 
 ui.blurMask.addEventListener('click', () => {
-  if (appState.running) {
-    stopSimulation();
+  if (isApplyingHistory) {
+    return;
   }
-  engine.blurMask(FIXED_MASK_BLUR_STRENGTH);
-  timelineStepDirty = true;
-  maskActions.push({ kind: 'blur', strength: FIXED_MASK_BLUR_STRENGTH });
-  enterMaskMode();
+  recordHistoryAction(() => {
+    if (appState.running) {
+      stopSimulation();
+    }
+    engine.blurMask(FIXED_MASK_BLUR_STRENGTH);
+    timelineStepDirty = true;
+    maskActions.push({ kind: 'blur', strength: FIXED_MASK_BLUR_STRENGTH });
+    enterMaskMode();
+  });
 });
 
 ui.clearMask.addEventListener('click', () => {
-  if (appState.running) {
-    stopSimulation();
+  if (isApplyingHistory) {
+    return;
   }
-  engine.clearMask();
-  timelineStepDirty = true;
-  clearMaskActionHistory();
-  enterMaskMode();
+  recordHistoryAction(() => {
+    if (appState.running) {
+      stopSimulation();
+    }
+    engine.clearMask();
+    timelineStepDirty = true;
+    clearMaskActionHistory();
+    enterMaskMode();
+  });
 });
 
 ui.collapseToggle.addEventListener('pointerdown', (event) => {
@@ -1659,6 +2049,19 @@ window.addEventListener('pointercancel', () => {
 });
 
 window.addEventListener('keydown', (event) => {
+  const withModifier = event.ctrlKey || event.metaKey;
+  const key = event.key.toLowerCase();
+  if (withModifier && !event.altKey && key === 'z' && !event.shiftKey) {
+    event.preventDefault();
+    undoHistoryStep();
+    return;
+  }
+  if (withModifier && !event.altKey && (key === 'y' || (key === 'z' && event.shiftKey))) {
+    event.preventDefault();
+    redoHistoryStep();
+    return;
+  }
+
   if (event.key !== 'Shift') {
     return;
   }
@@ -1697,6 +2100,10 @@ renderer.domElement.addEventListener('pointerdown', (event) => {
 
   const canMaskPaint = !appState.running && appState.viewMode === 'mask' && event.button === 0;
   if (canMaskPaint && hit) {
+    if (!maskStrokeHistoryActive) {
+      beginHistoryCapture();
+      maskStrokeHistoryActive = true;
+    }
     pointerDown = true;
     painting = true;
     erasing = event.shiftKey;
@@ -1736,6 +2143,10 @@ window.addEventListener('pointermove', (event) => {
 });
 
 window.addEventListener('pointerup', (event) => {
+  if (maskStrokeHistoryActive) {
+    finishHistoryCapture();
+    maskStrokeHistoryActive = false;
+  }
   pointerDown = false;
   painting = false;
   erasing = false;
@@ -1751,6 +2162,10 @@ window.addEventListener('pointerup', (event) => {
 });
 
 window.addEventListener('pointercancel', () => {
+  if (maskStrokeHistoryActive) {
+    finishHistoryCapture();
+    maskStrokeHistoryActive = false;
+  }
   pointerDown = false;
   painting = false;
   erasing = false;
