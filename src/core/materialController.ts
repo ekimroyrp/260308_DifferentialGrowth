@@ -72,9 +72,8 @@ export class MaterialController {
           vec3 lightB = normalize(uLightDirB);
 
           float curvature = clamp(vCurvature * uCurvatureContrast + uCurvatureBias, 0.0, 1.0);
-          float curvedCurvature = pow(curvature, 1.7);
           float displacement = clamp(vDisplacement, 0.0, 1.0);
-          vec3 curvatureColor = mix(uGradientStart, uGradientEnd, curvedCurvature);
+          vec3 curvatureColor = mix(uGradientStart, uGradientEnd, curvature);
           vec3 displacementColor = mix(uGradientStart, uGradientEnd, displacement);
           vec3 baseColor = mix(curvatureColor, displacementColor, step(0.5, uGradientType));
 

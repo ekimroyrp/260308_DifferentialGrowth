@@ -29,7 +29,7 @@ const materialSettings: MaterialSettings = {
 
 describe('MeshFactory welding', () => {
   it('welds seam vertices for all base shapes', () => {
-    const shapes = ['sphere', 'quad-sphere', 'torus', 'cube'] as const;
+    const shapes = ['sphere', 'quad-sphere', 'cube', 'rounded-cube', 'torus'] as const;
     for (const shape of shapes) {
       const geometry = buildShapeGeometry(shape);
       const position = geometry.getAttribute('position') as BufferAttribute;
@@ -50,6 +50,44 @@ describe('MeshFactory welding', () => {
 });
 
 describe('DifferentialGrowthEngine mask operations', () => {
+  it('seed influence controls deterministic and seed-specific variation', () => {
+    const geometryNoSeedA = buildShapeGeometry('sphere');
+    const geometryNoSeedB = buildShapeGeometry('sphere');
+    const engineNoSeedA = new DifferentialGrowthEngine(geometryNoSeedA, growthSettings, 111);
+    const engineNoSeedB = new DifferentialGrowthEngine(geometryNoSeedB, growthSettings, 999);
+    engineNoSeedA.step(0.02, 1, 0);
+    engineNoSeedB.step(0.02, 1, 0);
+
+    const noSeedA = (engineNoSeedA.getGeometry().getAttribute('position') as BufferAttribute).array as Float32Array;
+    const noSeedB = (engineNoSeedB.getGeometry().getAttribute('position') as BufferAttribute).array as Float32Array;
+    let maxNoSeedDelta = 0;
+    for (let i = 0; i < noSeedA.length; i += 1) {
+      const delta = Math.abs(noSeedA[i] - noSeedB[i]);
+      if (delta > maxNoSeedDelta) {
+        maxNoSeedDelta = delta;
+      }
+    }
+    expect(maxNoSeedDelta).toBeLessThan(1e-9);
+
+    const geometrySeedA = buildShapeGeometry('sphere');
+    const geometrySeedB = buildShapeGeometry('sphere');
+    const engineSeedA = new DifferentialGrowthEngine(geometrySeedA, growthSettings, 111);
+    const engineSeedB = new DifferentialGrowthEngine(geometrySeedB, growthSettings, 999);
+    engineSeedA.step(0.02, 1, 1);
+    engineSeedB.step(0.02, 1, 1);
+
+    const seededA = (engineSeedA.getGeometry().getAttribute('position') as BufferAttribute).array as Float32Array;
+    const seededB = (engineSeedB.getGeometry().getAttribute('position') as BufferAttribute).array as Float32Array;
+    let maxSeededDelta = 0;
+    for (let i = 0; i < seededA.length; i += 1) {
+      const delta = Math.abs(seededA[i] - seededB[i]);
+      if (delta > maxSeededDelta) {
+        maxSeededDelta = delta;
+      }
+    }
+    expect(maxSeededDelta).toBeGreaterThan(1e-6);
+  });
+
   it('updates normalized displacement attribute based on distance from base shape', () => {
     const geometry = buildShapeGeometry('sphere');
     const engine = new DifferentialGrowthEngine(geometry, growthSettings, 321);

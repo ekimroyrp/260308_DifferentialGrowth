@@ -1,19 +1,20 @@
-export type BaseShape = 'cube' | 'sphere' | 'quad-sphere' | 'torus';
+export type BaseShape = 'cube' | 'rounded-cube' | 'sphere' | 'quad-sphere' | 'torus';
 export type ViewMode = 'curvature' | 'mask';
 export type GradientType = 'curvature' | 'displacement';
 
 export type SimulationSettings = {
   growthSpeed: number;
   seed: number;
+  seedInfluence: number;
 };
 
 export type ShapeSettings = {
   baseShape: BaseShape;
   subdivision: number;
   showWireframe: boolean;
+  showMesh: boolean;
   brushRadius: number;
   falloffOffset: number;
-  blurMaskStrength: number;
 };
 
 export type GrowthSettings = {

@@ -18,6 +18,35 @@ function createQuadSphereGeometry(segments: number): BufferGeometry {
   return geometry;
 }
 
+function createRoundedCubeGeometry(segments: number): BufferGeometry {
+  const safeSegments = Math.max(2, Math.round(segments));
+  const size = 1.7;
+  const half = size * 0.5;
+  const roundness = size * 0.17;
+  const clampedRoundness = Math.min(roundness, half - 1e-4);
+  const inner = half - clampedRoundness;
+  const geometry = new BoxGeometry(size, size, size, safeSegments, safeSegments, safeSegments);
+  const position = geometry.getAttribute('position');
+  for (let i = 0; i < position.count; i += 1) {
+    const x = position.getX(i);
+    const y = position.getY(i);
+    const z = position.getZ(i);
+    const cx = MathUtils.clamp(x, -inner, inner);
+    const cy = MathUtils.clamp(y, -inner, inner);
+    const cz = MathUtils.clamp(z, -inner, inner);
+    tempDirection.set(x - cx, y - cy, z - cz).normalize();
+    position.setXYZ(
+      i,
+      cx + tempDirection.x * clampedRoundness,
+      cy + tempDirection.y * clampedRoundness,
+      cz + tempDirection.z * clampedRoundness,
+    );
+  }
+  position.needsUpdate = true;
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
 function createBaseGeometry(shape: BaseShape, subdivision: number): BufferGeometry {
   const t = MathUtils.clamp((subdivision - 1) / 99, 0, 1);
   switch (shape) {
@@ -43,6 +72,8 @@ function createBaseGeometry(shape: BaseShape, subdivision: number): BufferGeomet
         Math.round(MathUtils.lerp(8, 48, t)),
         Math.round(MathUtils.lerp(8, 48, t)),
       );
+    case 'rounded-cube':
+      return createRoundedCubeGeometry(Math.round(MathUtils.lerp(8, 52, t)));
     case 'quad-sphere':
       return createQuadSphereGeometry(Math.round(MathUtils.lerp(8, 56, t)));
     default:

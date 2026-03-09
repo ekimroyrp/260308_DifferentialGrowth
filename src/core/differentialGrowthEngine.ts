@@ -17,6 +17,7 @@ export class DifferentialGrowthEngine {
   private maskAttr: BufferAttribute;
   private curvatureAttr: BufferAttribute;
   private displacementAttr: BufferAttribute;
+  private variationAttr: BufferAttribute;
   private readonly settings: GrowthSettings;
   private basePositions: Float32Array;
   private curvatureWork: Float32Array;
@@ -32,6 +33,7 @@ export class DifferentialGrowthEngine {
     this.maskAttr = new BufferAttribute(new Float32Array(this.positionAttr.count), 1);
     this.curvatureAttr = new BufferAttribute(new Float32Array(this.positionAttr.count), 1);
     this.displacementAttr = new BufferAttribute(new Float32Array(this.positionAttr.count), 1);
+    this.variationAttr = new BufferAttribute(new Float32Array(this.positionAttr.count), 1);
     this.topology = { adjacency: [], edges: [] };
     this.basePositions = new Float32Array();
     this.curvatureWork = new Float32Array();
@@ -59,12 +61,16 @@ export class DifferentialGrowthEngine {
     this.curvatureAttr.setUsage(DynamicDrawUsage);
     this.displacementAttr = new BufferAttribute(new Float32Array(this.positionAttr.count), 1);
     this.displacementAttr.setUsage(DynamicDrawUsage);
+    this.variationAttr = new BufferAttribute(new Float32Array(this.positionAttr.count), 1);
+    this.variationAttr.setUsage(DynamicDrawUsage);
     this.geometry.setAttribute('aMask', this.maskAttr);
     this.geometry.setAttribute('aCurvature', this.curvatureAttr);
     this.geometry.setAttribute('aDisplacement', this.displacementAttr);
+    this.geometry.setAttribute('aVariation', this.variationAttr);
 
     this.topology = buildTopology(this.geometry);
     this.basePositions = Float32Array.from(this.positionAttr.array as ArrayLike<number>);
+    this.initializeSeedVariation();
     this.curvatureWork = new Float32Array(this.positionAttr.count);
     this.deltaWork = new Float32Array(this.positionAttr.count * 3);
     this.smoothWork = new Float32Array(this.positionAttr.count * 3);
@@ -162,7 +168,7 @@ export class DifferentialGrowthEngine {
     this.maskAttr.needsUpdate = true;
   }
 
-  step(deltaSeconds: number, growthSpeed: number): void {
+  step(deltaSeconds: number, growthSpeed: number, seedInfluence = 0.35): void {
     const safeDt = Math.min(Math.max(deltaSeconds, 0), 1 / 20);
     if (safeDt <= 0) {
       return;
@@ -176,7 +182,7 @@ export class DifferentialGrowthEngine {
       while (splitPasses < 2 && this.maybeSplitLongEdges()) {
         splitPasses += 1;
       }
-      this.integrate(scaledDt);
+      this.integrate(scaledDt, seedInfluence);
       this.applySurfaceSmoothing(
         Math.max(1, Math.round(1 + this.settings.smoothing * 3)),
         MathUtils.clamp(this.settings.smoothing * 0.34, 0, 0.42),
@@ -188,13 +194,17 @@ export class DifferentialGrowthEngine {
     }
   }
 
-  private integrate(dt: number): void {
+  private integrate(dt: number, seedInfluence: number): void {
     const positionArray = this.positionAttr.array as Float32Array;
     const normalArray = this.normalAttr.array as Float32Array;
     const maskArray = this.maskAttr.array as Float32Array;
+    const variationArray = this.variationAttr.array as Float32Array;
     const adjacency = this.topology.adjacency;
     const edges = this.topology.edges;
     const vertexCount = maskArray.length;
+    const influence = MathUtils.clamp(seedInfluence, 0, 1);
+    const dynamicNoiseAmplitude = 0.06 * influence;
+    const staticVariationAmplitude = 0.9 * influence;
 
     this.deltaWork.fill(0);
 
@@ -240,8 +250,10 @@ export class DifferentialGrowthEngine {
       const index = i * 3;
       const block = 1 - MathUtils.clamp(maskArray[i], 0, 1);
       const curvatureFactor = this.curvatureWork[i] * invCurvature;
-      const noise = this.rng.signed() * 0.02;
-      const growth = Math.max(0, growthBase * block * (0.6 + curvatureFactor * 0.95 + noise));
+      const noise = this.rng.signed() * dynamicNoiseAmplitude;
+      const variation = variationArray[i] ?? 0;
+      const seededScale = Math.max(0.12, 1 + variation * staticVariationAmplitude);
+      const growth = Math.max(0, growthBase * block * (0.6 + curvatureFactor * 0.95 + noise) * seededScale);
       this.deltaWork[index] += normalArray[index] * growth;
       this.deltaWork[index + 1] += normalArray[index + 1] * growth;
       this.deltaWork[index + 2] += normalArray[index + 2] * growth;
@@ -517,12 +529,14 @@ export class DifferentialGrowthEngine {
     const srcPos = source.getAttribute('position') as BufferAttribute;
     const srcMask = source.getAttribute('aMask') as BufferAttribute;
     const srcBase = source.getAttribute('aBasePos') as BufferAttribute;
+    const srcVariation = source.getAttribute('aVariation') as BufferAttribute;
     const triCount = Math.floor(srcPos.count / 3);
     const nextVertexCount = triCount * 12;
 
     const nextPos = new Float32Array(nextVertexCount * 3);
     const nextMask = new Float32Array(nextVertexCount);
     const nextBase = new Float32Array(nextVertexCount * 3);
+    const nextVariation = new Float32Array(nextVertexCount);
 
     let writeVertex = 0;
 
@@ -534,6 +548,7 @@ export class DifferentialGrowthEngine {
       bx: number,
       by: number,
       bz: number,
+      variation: number,
     ): void => {
       const pIndex = writeVertex * 3;
       nextPos[pIndex] = px;
@@ -543,6 +558,7 @@ export class DifferentialGrowthEngine {
       nextBase[pIndex] = bx;
       nextBase[pIndex + 1] = by;
       nextBase[pIndex + 2] = bz;
+      nextVariation[writeVertex] = variation;
       writeVertex += 1;
     };
 
@@ -564,6 +580,9 @@ export class DifferentialGrowthEngine {
       const m0 = srcMask.getX(i0);
       const m1 = srcMask.getX(i1);
       const m2 = srcMask.getX(i2);
+      const v0 = srcVariation.getX(i0);
+      const v1 = srcVariation.getX(i1);
+      const v2 = srcVariation.getX(i2);
 
       const b0x = srcBase.getX(i0);
       const b0y = srcBase.getY(i0);
@@ -588,6 +607,9 @@ export class DifferentialGrowthEngine {
       const m01 = (m0 + m1) * 0.5;
       const m12 = (m1 + m2) * 0.5;
       const m20 = (m2 + m0) * 0.5;
+      const v01 = (v0 + v1) * 0.5;
+      const v12 = (v1 + v2) * 0.5;
+      const v20 = (v2 + v0) * 0.5;
 
       const b01x = (b0x + b1x) * 0.5;
       const b01y = (b0y + b1y) * 0.5;
@@ -600,44 +622,52 @@ export class DifferentialGrowthEngine {
       const b20z = (b2z + b0z) * 0.5;
 
       // Subdivide one triangle into 4 and carry mask/base attributes through interpolation.
-      write(p0x, p0y, p0z, m0, b0x, b0y, b0z);
-      write(p01x, p01y, p01z, m01, b01x, b01y, b01z);
-      write(p20x, p20y, p20z, m20, b20x, b20y, b20z);
+      write(p0x, p0y, p0z, m0, b0x, b0y, b0z, v0);
+      write(p01x, p01y, p01z, m01, b01x, b01y, b01z, v01);
+      write(p20x, p20y, p20z, m20, b20x, b20y, b20z, v20);
 
-      write(p1x, p1y, p1z, m1, b1x, b1y, b1z);
-      write(p12x, p12y, p12z, m12, b12x, b12y, b12z);
-      write(p01x, p01y, p01z, m01, b01x, b01y, b01z);
+      write(p1x, p1y, p1z, m1, b1x, b1y, b1z, v1);
+      write(p12x, p12y, p12z, m12, b12x, b12y, b12z, v12);
+      write(p01x, p01y, p01z, m01, b01x, b01y, b01z, v01);
 
-      write(p2x, p2y, p2z, m2, b2x, b2y, b2z);
-      write(p20x, p20y, p20z, m20, b20x, b20y, b20z);
-      write(p12x, p12y, p12z, m12, b12x, b12y, b12z);
+      write(p2x, p2y, p2z, m2, b2x, b2y, b2z, v2);
+      write(p20x, p20y, p20z, m20, b20x, b20y, b20z, v20);
+      write(p12x, p12y, p12z, m12, b12x, b12y, b12z, v12);
 
-      write(p01x, p01y, p01z, m01, b01x, b01y, b01z);
-      write(p12x, p12y, p12z, m12, b12x, b12y, b12z);
-      write(p20x, p20y, p20z, m20, b20x, b20y, b20z);
+      write(p01x, p01y, p01z, m01, b01x, b01y, b01z, v01);
+      write(p12x, p12y, p12z, m12, b12x, b12y, b12z, v12);
+      write(p20x, p20y, p20z, m20, b20x, b20y, b20z, v20);
     }
 
     const subdivided = new BufferGeometry();
     subdivided.setAttribute('position', new BufferAttribute(nextPos, 3));
     subdivided.setAttribute('aMask', new BufferAttribute(nextMask, 1));
     subdivided.setAttribute('aBasePos', new BufferAttribute(nextBase, 3));
+    subdivided.setAttribute('aVariation', new BufferAttribute(nextVariation, 1));
     const merged = mergeVertices(subdivided, 1e-6);
     merged.computeVertexNormals();
 
     const mergedMaskAttr = merged.getAttribute('aMask') as BufferAttribute | undefined;
     const mergedBaseAttr = merged.getAttribute('aBasePos') as BufferAttribute | undefined;
+    const mergedVariationAttr = merged.getAttribute('aVariation') as BufferAttribute | undefined;
     const maskArray = mergedMaskAttr
       ? Float32Array.from(mergedMaskAttr.array as ArrayLike<number>)
       : new Float32Array((merged.getAttribute('position') as BufferAttribute).count);
     const baseArray = mergedBaseAttr
       ? Float32Array.from(mergedBaseAttr.array as ArrayLike<number>)
       : Float32Array.from((merged.getAttribute('position') as BufferAttribute).array as ArrayLike<number>);
+    const variationArray = mergedVariationAttr
+      ? Float32Array.from(mergedVariationAttr.array as ArrayLike<number>)
+      : new Float32Array((merged.getAttribute('position') as BufferAttribute).count);
     merged.deleteAttribute('aMask');
     merged.deleteAttribute('aBasePos');
+    merged.deleteAttribute('aVariation');
 
     this.setGeometry(merged);
     (this.maskAttr.array as Float32Array).set(maskArray);
     this.maskAttr.needsUpdate = true;
+    (this.variationAttr.array as Float32Array).set(variationArray);
+    this.variationAttr.needsUpdate = true;
     this.basePositions = baseArray;
     this.updateCurvatureAttribute();
 
@@ -763,5 +793,13 @@ export class DifferentialGrowthEngine {
     }
     this.curvatureAttr.needsUpdate = true;
     this.displacementAttr.needsUpdate = true;
+  }
+
+  private initializeSeedVariation(): void {
+    const variationArray = this.variationAttr.array as Float32Array;
+    for (let i = 0; i < variationArray.length; i += 1) {
+      variationArray[i] = this.rng.signed();
+    }
+    this.variationAttr.needsUpdate = true;
   }
 }

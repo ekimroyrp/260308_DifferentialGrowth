@@ -43,26 +43,17 @@
             <span class="panel-section-label">Simulation</span>
           </div>
           <div class="panel-section-content panel-controls-stack">
-            <div class="control control-grid-3">
+            <div class="control control-grid-2">
               <button type="button" id="start-sim" class="pill-button control-button-wide">Start</button>
-              <button type="button" id="mask-mode" class="pill-button control-button-wide">Mask</button>
               <button type="button" id="reset-sim" class="pill-button control-button-wide">Reset</button>
             </div>
 
             <label class="control">
               <div class="control-row">
-                <span>Growth Speed</span>
+                <span>Simulation Rate</span>
                 <span id="growth-speed-value">1.00</span>
               </div>
               <input type="range" id="growth-speed" min="0.1" max="3" step="0.01" value="1" />
-            </label>
-
-            <label class="control">
-              <div class="control-row">
-                <span>Seed</span>
-                <span id="seed-value-label">351107</span>
-              </div>
-              <input type="range" id="seed-value" min="0" max="999999" step="1" value="351107" />
             </label>
           </div>
         </section>
@@ -80,22 +71,40 @@
                 <option value="sphere">Sphere</option>
                 <option value="quad-sphere">Quad Sphere</option>
                 <option value="cube">Cube</option>
+                <option value="rounded-cube">Rounded Cube</option>
                 <option value="torus">Torus</option>
               </select>
             </label>
 
             <label class="control">
               <div class="control-row">
-                <span>Subdivision</span>
+                <span>Start Subdivision</span>
                 <span id="subdivision-value">35</span>
               </div>
               <input type="range" id="subdivision" min="1" max="100" step="1" value="35" />
             </label>
 
-            <label class="control compact toggle-control" for="show-wireframe">
-              <span>Show Wireframe</span>
-              <input type="checkbox" id="show-wireframe" />
-            </label>
+            <div class="control control-grid-2">
+              <label class="control compact toggle-control" for="show-mesh">
+                <span>Show Mesh</span>
+                <input type="checkbox" id="show-mesh" checked />
+              </label>
+              <label class="control compact toggle-control" for="show-wireframe">
+                <span>Show Wireframe</span>
+                <input type="checkbox" id="show-wireframe" />
+              </label>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel-section">
+          <div class="panel-section-header">
+            <span class="panel-section-label">Mask</span>
+          </div>
+          <div class="panel-section-content panel-controls-stack">
+            <div class="control">
+              <button type="button" id="mask-mode" class="pill-button control-button-wide">Draw Mask</button>
+            </div>
 
             <label class="control">
               <div class="control-row">
@@ -111,14 +120,6 @@
                 <span id="falloff-offset-value">0.08</span>
               </div>
               <input type="range" id="falloff-offset" min="0" max="0.5" step="0.005" value="0.08" />
-            </label>
-
-            <label class="control">
-              <div class="control-row">
-                <span>Blur Mask</span>
-                <span id="blur-mask-value">0.35</span>
-              </div>
-              <input type="range" id="blur-mask-strength" min="0" max="1" step="0.01" value="0.35" />
             </label>
 
             <div class="control control-grid-2">
@@ -139,6 +140,22 @@
                 <span id="growth-step-value">0.22</span>
               </div>
               <input type="range" id="growth-step" min="0.05" max="2" step="0.01" value="0.22" />
+            </label>
+
+            <label class="control">
+              <div class="control-row">
+                <span>Growth Seed</span>
+                <span id="seed-value-label">351107</span>
+              </div>
+              <input type="range" id="seed-value" min="0" max="999999" step="1" value="351107" />
+            </label>
+
+            <label class="control">
+              <div class="control-row">
+                <span>Growth Jitter</span>
+                <span id="seed-influence-value">0.35</span>
+              </div>
+              <input type="range" id="seed-influence" min="0" max="1" step="0.01" value="0.35" />
             </label>
 
             <label class="control">
@@ -188,6 +205,7 @@
               </div>
               <input type="range" id="max-vertices" min="10000" max="120000" step="1000" value="50000" />
             </label>
+
           </div>
         </section>
 
@@ -217,24 +235,24 @@
                 <div class="control-row">
                   <span>Gradient End</span>
                 </div>
-                <input type="color" id="gradient-end-color" class="color-picker" value="#2e4fb4" />
+                <input type="color" id="gradient-end-color" class="color-picker" value="#ff0000" />
               </label>
             </div>
 
             <label class="control">
               <div class="control-row">
                 <span>Curvature Contrast</span>
-                <span id="curvature-contrast-value">1.25</span>
+                <span id="curvature-contrast-value">1.40</span>
               </div>
-              <input type="range" id="curvature-contrast" min="0.2" max="3" step="0.01" value="1.25" />
+              <input type="range" id="curvature-contrast" min="0.2" max="3" step="0.01" value="1.4" />
             </label>
 
             <label class="control">
               <div class="control-row">
                 <span>Curvature Bias</span>
-                <span id="curvature-bias-value">0.00</span>
+                <span id="curvature-bias-value">-0.40</span>
               </div>
-              <input type="range" id="curvature-bias" min="-1" max="1" step="0.01" value="0" />
+              <input type="range" id="curvature-bias" min="-1" max="1" step="0.01" value="-0.4" />
             </label>
 
             <label class="control">

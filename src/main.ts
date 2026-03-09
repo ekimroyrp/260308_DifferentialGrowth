@@ -50,16 +50,17 @@ type UiRefs = {
   growthSpeedValue: HTMLSpanElement;
   seed: HTMLInputElement;
   seedValueLabel: HTMLSpanElement;
+  seedInfluence: HTMLInputElement;
+  seedInfluenceValue: HTMLSpanElement;
   baseShape: HTMLSelectElement;
   subdivision: HTMLInputElement;
   subdivisionValue: HTMLSpanElement;
   showWireframe: HTMLInputElement;
+  showMesh: HTMLInputElement;
   brushRadius: HTMLInputElement;
   brushRadiusValue: HTMLSpanElement;
   falloffOffset: HTMLInputElement;
   falloffOffsetValue: HTMLSpanElement;
-  blurMaskStrength: HTMLInputElement;
-  blurMaskValue: HTMLSpanElement;
   growthStep: HTMLInputElement;
   growthStepValue: HTMLSpanElement;
   targetEdgeLength: HTMLInputElement;
@@ -94,6 +95,8 @@ type UiRefs = {
   falloffCircle: SVGCircleElement;
   brushDot: SVGCircleElement;
 };
+
+const FIXED_MASK_BLUR_STRENGTH = 0.35;
 
 function revealUiWhenStyled(maxWaitMs = 1500): void {
   const start = performance.now();
@@ -161,16 +164,17 @@ const ui: UiRefs = {
   growthSpeedValue: requiredElement('growth-speed-value', isSpan),
   seed: requiredElement('seed-value', isInput),
   seedValueLabel: requiredElement('seed-value-label', isSpan),
+  seedInfluence: requiredElement('seed-influence', isInput),
+  seedInfluenceValue: requiredElement('seed-influence-value', isSpan),
   baseShape: requiredElement('base-shape', isSelect),
   subdivision: requiredElement('subdivision', isInput),
   subdivisionValue: requiredElement('subdivision-value', isSpan),
   showWireframe: requiredElement('show-wireframe', isInput),
+  showMesh: requiredElement('show-mesh', isInput),
   brushRadius: requiredElement('brush-radius', isInput),
   brushRadiusValue: requiredElement('brush-radius-value', isSpan),
   falloffOffset: requiredElement('falloff-offset', isInput),
   falloffOffsetValue: requiredElement('falloff-offset-value', isSpan),
-  blurMaskStrength: requiredElement('blur-mask-strength', isInput),
-  blurMaskValue: requiredElement('blur-mask-value', isSpan),
   growthStep: requiredElement('growth-step', isInput),
   growthStepValue: requiredElement('growth-step-value', isSpan),
   targetEdgeLength: requiredElement('target-edge-length', isInput),
@@ -216,15 +220,16 @@ revealUiWhenStyled();
 const simulationSettings: SimulationSettings = {
   growthSpeed: Number.parseFloat(ui.growthSpeed.value),
   seed: Number.parseInt(ui.seed.value, 10),
+  seedInfluence: Number.parseFloat(ui.seedInfluence.value),
 };
 
 const shapeSettings: ShapeSettings = {
   baseShape: ui.baseShape.value as BaseShape,
   subdivision: Number.parseInt(ui.subdivision.value, 10),
   showWireframe: ui.showWireframe.checked,
+  showMesh: ui.showMesh.checked,
   brushRadius: Number.parseFloat(ui.brushRadius.value),
   falloffOffset: Number.parseFloat(ui.falloffOffset.value),
-  blurMaskStrength: Number.parseFloat(ui.blurMaskStrength.value),
 };
 
 const growthSettings: GrowthSettings = {
@@ -285,6 +290,7 @@ const materialController = new MaterialController(materialSettings);
 const initialGeometry = buildShapeGeometry(shapeSettings.baseShape, shapeSettings.subdivision);
 prepareGeometry(initialGeometry);
 const mesh = new Mesh(initialGeometry, materialController.material);
+mesh.visible = shapeSettings.showMesh;
 scene.add(mesh);
 const wireframeMaterial = new MeshBasicMaterial({
   color: 0xe6f1ff,
@@ -455,8 +461,8 @@ function resetSimulation(): void {
   mesh.geometry = nextGeometry;
   wireframeMesh.geometry = nextGeometry;
   previousGeometry.dispose();
-  engine.setGeometry(nextGeometry);
   engine.reseed(simulationSettings.seed);
+  engine.setGeometry(nextGeometry);
   controls.target.set(0, 0, 0);
   camera.position.set(0, 0.25, 4.2);
   controls.update();
@@ -540,6 +546,9 @@ bindRange(ui.seed, ui.seedValueLabel, (value) => `${Math.round(value)}`, (value)
     resetSimulation();
   }
 });
+bindRange(ui.seedInfluence, ui.seedInfluenceValue, (value) => value.toFixed(2), (value) => {
+  simulationSettings.seedInfluence = value;
+});
 bindRange(ui.subdivision, ui.subdivisionValue, (value) => `${Math.round(value)}`, (value) => {
   shapeSettings.subdivision = Math.round(value);
 });
@@ -548,9 +557,6 @@ bindRange(ui.brushRadius, ui.brushRadiusValue, (value) => value.toFixed(2), (val
 });
 bindRange(ui.falloffOffset, ui.falloffOffsetValue, (value) => value.toFixed(2), (value) => {
   shapeSettings.falloffOffset = value;
-});
-bindRange(ui.blurMaskStrength, ui.blurMaskValue, (value) => value.toFixed(2), (value) => {
-  shapeSettings.blurMaskStrength = value;
 });
 bindRange(ui.growthStep, ui.growthStepValue, (value) => value.toFixed(2), (value) => {
   growthSettings.growthStep = value;
@@ -629,6 +635,10 @@ ui.showWireframe.addEventListener('change', () => {
   shapeSettings.showWireframe = ui.showWireframe.checked;
   wireframeMesh.visible = shapeSettings.showWireframe;
 });
+ui.showMesh.addEventListener('change', () => {
+  shapeSettings.showMesh = ui.showMesh.checked;
+  mesh.visible = shapeSettings.showMesh;
+});
 
 ui.start.addEventListener('click', () => {
   if (appState.running) {
@@ -650,7 +660,7 @@ ui.blurMask.addEventListener('click', () => {
   if (appState.running) {
     stopSimulation();
   }
-  engine.blurMask(shapeSettings.blurMaskStrength);
+  engine.blurMask(FIXED_MASK_BLUR_STRENGTH);
   enterMaskMode();
 });
 
@@ -771,7 +781,7 @@ renderer.setAnimationLoop((now) => {
 
   controls.update();
   if (appState.running) {
-    engine.step(dt, simulationSettings.growthSpeed);
+    engine.step(dt, simulationSettings.growthSpeed, simulationSettings.seedInfluence);
     const activeGeometry = engine.getGeometry();
     if (mesh.geometry !== activeGeometry) {
       const previous = mesh.geometry;
