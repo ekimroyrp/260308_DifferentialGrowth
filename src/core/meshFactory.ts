@@ -3,6 +3,20 @@ import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { BaseShape } from '../types';
 
 const tempCenter = new Vector3();
+const tempDirection = new Vector3();
+
+function createQuadSphereGeometry(segments: number): BufferGeometry {
+  const safeSegments = Math.max(2, Math.round(segments));
+  const geometry = new BoxGeometry(2, 2, 2, safeSegments, safeSegments, safeSegments);
+  const position = geometry.getAttribute('position');
+  for (let i = 0; i < position.count; i += 1) {
+    tempDirection.set(position.getX(i), position.getY(i), position.getZ(i)).normalize();
+    position.setXYZ(i, tempDirection.x, tempDirection.y, tempDirection.z);
+  }
+  position.needsUpdate = true;
+  geometry.computeVertexNormals();
+  return geometry;
+}
 
 function createBaseGeometry(shape: BaseShape, subdivision: number): BufferGeometry {
   const t = MathUtils.clamp((subdivision - 1) / 99, 0, 1);
@@ -29,6 +43,8 @@ function createBaseGeometry(shape: BaseShape, subdivision: number): BufferGeomet
         Math.round(MathUtils.lerp(8, 48, t)),
         Math.round(MathUtils.lerp(8, 48, t)),
       );
+    case 'quad-sphere':
+      return createQuadSphereGeometry(Math.round(MathUtils.lerp(8, 56, t)));
     default:
       return new SphereGeometry(1.15, 48, 32);
   }
