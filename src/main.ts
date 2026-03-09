@@ -33,6 +33,7 @@ import type {
   MaterialSettings,
   ShapeSettings,
   SimulationSettings,
+  TransformOrder,
   ViewMode,
 } from './types';
 
@@ -44,6 +45,7 @@ type UiRefs = {
   start: HTMLButtonElement;
   maskMode: HTMLButtonElement;
   reset: HTMLButtonElement;
+  resetTransform: HTMLButtonElement;
   blurMask: HTMLButtonElement;
   clearMask: HTMLButtonElement;
   growthSpeed: HTMLInputElement;
@@ -53,8 +55,21 @@ type UiRefs = {
   seedInfluence: HTMLInputElement;
   seedInfluenceValue: HTMLSpanElement;
   baseShape: HTMLSelectElement;
+  transformOrder: HTMLSelectElement;
   subdivision: HTMLInputElement;
   subdivisionValue: HTMLSpanElement;
+  scaleX: HTMLInputElement;
+  scaleXValue: HTMLSpanElement;
+  scaleY: HTMLInputElement;
+  scaleYValue: HTMLSpanElement;
+  scaleZ: HTMLInputElement;
+  scaleZValue: HTMLSpanElement;
+  rotateX: HTMLInputElement;
+  rotateXValue: HTMLSpanElement;
+  rotateY: HTMLInputElement;
+  rotateYValue: HTMLSpanElement;
+  rotateZ: HTMLInputElement;
+  rotateZValue: HTMLSpanElement;
   showWireframe: HTMLInputElement;
   showMesh: HTMLInputElement;
   brushRadius: HTMLInputElement;
@@ -160,6 +175,7 @@ const ui: UiRefs = {
   start: requiredElement('start-sim', isButton),
   maskMode: requiredElement('mask-mode', isButton),
   reset: requiredElement('reset-sim', isButton),
+  resetTransform: requiredElement('reset-transform', isButton),
   blurMask: requiredElement('blur-mask', isButton),
   clearMask: requiredElement('clear-mask', isButton),
   growthSpeed: requiredElement('growth-speed', isInput),
@@ -169,8 +185,21 @@ const ui: UiRefs = {
   seedInfluence: requiredElement('seed-influence', isInput),
   seedInfluenceValue: requiredElement('seed-influence-value', isSpan),
   baseShape: requiredElement('base-shape', isSelect),
+  transformOrder: requiredElement('transform-order', isSelect),
   subdivision: requiredElement('subdivision', isInput),
   subdivisionValue: requiredElement('subdivision-value', isSpan),
+  scaleX: requiredElement('scale-x', isInput),
+  scaleXValue: requiredElement('scale-x-value', isSpan),
+  scaleY: requiredElement('scale-y', isInput),
+  scaleYValue: requiredElement('scale-y-value', isSpan),
+  scaleZ: requiredElement('scale-z', isInput),
+  scaleZValue: requiredElement('scale-z-value', isSpan),
+  rotateX: requiredElement('rotate-x', isInput),
+  rotateXValue: requiredElement('rotate-x-value', isSpan),
+  rotateY: requiredElement('rotate-y', isInput),
+  rotateYValue: requiredElement('rotate-y-value', isSpan),
+  rotateZ: requiredElement('rotate-z', isInput),
+  rotateZValue: requiredElement('rotate-z-value', isSpan),
   showWireframe: requiredElement('show-wireframe', isInput),
   showMesh: requiredElement('show-mesh', isInput),
   brushRadius: requiredElement('brush-radius', isInput),
@@ -230,6 +259,13 @@ const simulationSettings: SimulationSettings = {
 const shapeSettings: ShapeSettings = {
   baseShape: ui.baseShape.value as BaseShape,
   subdivision: Number.parseInt(ui.subdivision.value, 10),
+  transformOrder: ui.transformOrder.value as TransformOrder,
+  scaleX: Number.parseFloat(ui.scaleX.value),
+  scaleY: Number.parseFloat(ui.scaleY.value),
+  scaleZ: Number.parseFloat(ui.scaleZ.value),
+  rotateX: Number.parseFloat(ui.rotateX.value),
+  rotateY: Number.parseFloat(ui.rotateY.value),
+  rotateZ: Number.parseFloat(ui.rotateZ.value),
   showWireframe: ui.showWireframe.checked,
   showMesh: ui.showMesh.checked,
   brushRadius: Number.parseFloat(ui.brushRadius.value),
@@ -293,8 +329,27 @@ controls.update();
 renderer.domElement.addEventListener('contextmenu', (event) => event.preventDefault());
 window.addEventListener('contextmenu', (event) => event.preventDefault());
 
+function buildScaledShapeGeometry(): BufferGeometry {
+  const geometry = buildShapeGeometry(shapeSettings.baseShape, shapeSettings.subdivision);
+  const rx = (shapeSettings.rotateX * Math.PI) / 180;
+  const ry = (shapeSettings.rotateY * Math.PI) / 180;
+  const rz = (shapeSettings.rotateZ * Math.PI) / 180;
+  if (shapeSettings.transformOrder === 'rotate-then-scale') {
+    geometry.rotateX(rx);
+    geometry.rotateY(ry);
+    geometry.rotateZ(rz);
+    geometry.scale(shapeSettings.scaleX, shapeSettings.scaleY, shapeSettings.scaleZ);
+  } else {
+    geometry.scale(shapeSettings.scaleX, shapeSettings.scaleY, shapeSettings.scaleZ);
+    geometry.rotateX(rx);
+    geometry.rotateY(ry);
+    geometry.rotateZ(rz);
+  }
+  return geometry;
+}
+
 const materialController = new MaterialController(materialSettings);
-const initialGeometry = buildShapeGeometry(shapeSettings.baseShape, shapeSettings.subdivision);
+const initialGeometry = buildScaledShapeGeometry();
 prepareGeometry(initialGeometry);
 const mesh = new Mesh(initialGeometry, materialController.material);
 mesh.visible = shapeSettings.showMesh;
@@ -345,6 +400,21 @@ let pointerDown = false;
 let painting = false;
 let erasing = false;
 let shiftDown = false;
+let shapeResetQueued = false;
+let controlsInitialized = false;
+let subdivisionWireframePreviewActive = false;
+
+function syncWireframeVisibility(): void {
+  wireframeMesh.visible = shapeSettings.showWireframe || subdivisionWireframePreviewActive;
+}
+
+function setSubdivisionWireframePreview(active: boolean): void {
+  if (subdivisionWireframePreviewActive === active) {
+    return;
+  }
+  subdivisionWireframePreviewActive = active;
+  syncWireframeVisibility();
+}
 
 function prepareGeometry(geometry: BufferGeometry): void {
   geometry.computeVertexNormals();
@@ -532,7 +602,7 @@ function exitMaskMode(): void {
 }
 
 function resetSimulation(): void {
-  const nextGeometry = buildShapeGeometry(shapeSettings.baseShape, shapeSettings.subdivision);
+  const nextGeometry = buildScaledShapeGeometry();
   prepareGeometry(nextGeometry);
   const previousGeometry = mesh.geometry;
   mesh.geometry = nextGeometry;
@@ -564,6 +634,17 @@ function syncUiState(): void {
   if (appState.running) {
     setOverlayVisible(false);
   }
+}
+
+function scheduleShapeReset(): void {
+  if (!controlsInitialized || shapeResetQueued) {
+    return;
+  }
+  shapeResetQueued = true;
+  requestAnimationFrame(() => {
+    shapeResetQueued = false;
+    resetSimulation();
+  });
 }
 
 function clampPanelToViewport(): void {
@@ -938,6 +1019,7 @@ function bindCustomSelect(select: HTMLSelectElement): void {
 
 bindSectionCollapseToggles();
 bindCustomSelect(ui.baseShape);
+bindCustomSelect(ui.transformOrder);
 bindCustomSelect(ui.gradientType);
 
 bindRange(ui.growthSpeed, ui.growthSpeedValue, (value) => value.toFixed(2), (value) => {
@@ -955,6 +1037,31 @@ bindRange(ui.seedInfluence, ui.seedInfluenceValue, (value) => value.toFixed(2), 
 });
 bindRange(ui.subdivision, ui.subdivisionValue, (value) => `${Math.round(value)}`, (value) => {
   shapeSettings.subdivision = Math.round(value);
+  scheduleShapeReset();
+});
+bindRange(ui.scaleX, ui.scaleXValue, (value) => value.toFixed(2), (value) => {
+  shapeSettings.scaleX = value;
+  scheduleShapeReset();
+});
+bindRange(ui.scaleY, ui.scaleYValue, (value) => value.toFixed(2), (value) => {
+  shapeSettings.scaleY = value;
+  scheduleShapeReset();
+});
+bindRange(ui.scaleZ, ui.scaleZValue, (value) => value.toFixed(2), (value) => {
+  shapeSettings.scaleZ = value;
+  scheduleShapeReset();
+});
+bindRange(ui.rotateX, ui.rotateXValue, (value) => `${Math.round(value)}`, (value) => {
+  shapeSettings.rotateX = value;
+  scheduleShapeReset();
+});
+bindRange(ui.rotateY, ui.rotateYValue, (value) => `${Math.round(value)}`, (value) => {
+  shapeSettings.rotateY = value;
+  scheduleShapeReset();
+});
+bindRange(ui.rotateZ, ui.rotateZValue, (value) => `${Math.round(value)}`, (value) => {
+  shapeSettings.rotateZ = value;
+  scheduleShapeReset();
 });
 bindRange(ui.brushRadius, ui.brushRadiusValue, (value) => value.toFixed(2), (value) => {
   shapeSettings.brushRadius = value;
@@ -1038,16 +1145,48 @@ ui.baseShape.addEventListener('change', () => {
   shapeSettings.baseShape = ui.baseShape.value as BaseShape;
   resetSimulation();
 });
-ui.subdivision.addEventListener('change', () => {
+ui.transformOrder.addEventListener('change', () => {
+  shapeSettings.transformOrder = ui.transformOrder.value as TransformOrder;
   resetSimulation();
+});
+ui.subdivision.addEventListener('pointerdown', () => {
+  setSubdivisionWireframePreview(true);
+});
+ui.subdivision.addEventListener('input', () => {
+  setSubdivisionWireframePreview(true);
+});
+ui.subdivision.addEventListener('keydown', () => {
+  setSubdivisionWireframePreview(true);
+});
+ui.subdivision.addEventListener('keyup', () => {
+  setSubdivisionWireframePreview(false);
+});
+ui.subdivision.addEventListener('change', () => {
+  setSubdivisionWireframePreview(false);
+});
+ui.subdivision.addEventListener('blur', () => {
+  setSubdivisionWireframePreview(false);
 });
 ui.showWireframe.addEventListener('change', () => {
   shapeSettings.showWireframe = ui.showWireframe.checked;
-  wireframeMesh.visible = shapeSettings.showWireframe;
+  syncWireframeVisibility();
 });
 ui.showMesh.addEventListener('change', () => {
   shapeSettings.showMesh = ui.showMesh.checked;
   mesh.visible = shapeSettings.showMesh;
+});
+
+ui.resetTransform.addEventListener('click', () => {
+  const setRangeValue = (input: HTMLInputElement, value: number): void => {
+    input.value = `${value}`;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  };
+  setRangeValue(ui.scaleX, 1);
+  setRangeValue(ui.scaleY, 1);
+  setRangeValue(ui.scaleZ, 1);
+  setRangeValue(ui.rotateX, 0);
+  setRangeValue(ui.rotateY, 0);
+  setRangeValue(ui.rotateZ, 0);
 });
 
 ui.start.addEventListener('click', () => {
@@ -1121,9 +1260,11 @@ window.addEventListener('pointermove', (event) => {
   clampPanelToViewport();
 });
 window.addEventListener('pointerup', () => {
+  setSubdivisionWireframePreview(false);
   draggingPanel = false;
 });
 window.addEventListener('pointercancel', () => {
+  setSubdivisionWireframePreview(false);
   draggingPanel = false;
 });
 
@@ -1228,6 +1369,8 @@ window.addEventListener('pointercancel', () => {
 });
 
 window.addEventListener('resize', handleResize);
+
+controlsInitialized = true;
 
 let lastTime = performance.now();
 renderer.setAnimationLoop((now) => {

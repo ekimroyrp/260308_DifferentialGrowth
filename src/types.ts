@@ -10,6 +10,7 @@ export type BaseShape =
   | 'torus';
 export type ViewMode = 'curvature' | 'mask';
 export type GradientType = 'curvature' | 'displacement';
+export type TransformOrder = 'scale-then-rotate' | 'rotate-then-scale';
 
 export type SimulationSettings = {
   growthSpeed: number;
@@ -20,6 +21,13 @@ export type SimulationSettings = {
 export type ShapeSettings = {
   baseShape: BaseShape;
   subdivision: number;
+  transformOrder: TransformOrder;
+  scaleX: number;
+  scaleY: number;
+  scaleZ: number;
+  rotateX: number;
+  rotateY: number;
+  rotateZ: number;
   showWireframe: boolean;
   showMesh: boolean;
   brushRadius: number;
