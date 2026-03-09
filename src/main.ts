@@ -114,6 +114,10 @@ type UiRefs = {
 };
 
 const FIXED_MASK_BLUR_STRENGTH = 0.35;
+type MaskAction =
+  | { kind: 'paint'; point: Vector3; radius: number; falloffOffset: number }
+  | { kind: 'erase'; point: Vector3; radius: number; falloffOffset: number }
+  | { kind: 'blur'; strength: number };
 
 function revealUiWhenStyled(maxWaitMs = 1500): void {
   const start = performance.now();
@@ -403,6 +407,7 @@ let shiftDown = false;
 let shapeResetQueued = false;
 let controlsInitialized = false;
 let subdivisionWireframePreviewActive = false;
+const maskActions: MaskAction[] = [];
 
 function syncWireframeVisibility(): void {
   wireframeMesh.visible = shapeSettings.showWireframe || subdivisionWireframePreviewActive;
@@ -530,13 +535,44 @@ function isPanelTarget(event: Event): boolean {
 function paintAt(hitPoint: Vector3): void {
   tempLocal.copy(hitPoint);
   mesh.worldToLocal(tempLocal);
-  engine.paintMask(tempLocal, shapeSettings.brushRadius, shapeSettings.falloffOffset);
+  const point = tempLocal.clone();
+  engine.paintMask(point, shapeSettings.brushRadius, shapeSettings.falloffOffset);
+  maskActions.push({
+    kind: 'paint',
+    point,
+    radius: shapeSettings.brushRadius,
+    falloffOffset: shapeSettings.falloffOffset,
+  });
 }
 
 function eraseAt(hitPoint: Vector3): void {
   tempLocal.copy(hitPoint);
   mesh.worldToLocal(tempLocal);
-  engine.eraseMask(tempLocal, shapeSettings.brushRadius, shapeSettings.falloffOffset);
+  const point = tempLocal.clone();
+  engine.eraseMask(point, shapeSettings.brushRadius, shapeSettings.falloffOffset);
+  maskActions.push({
+    kind: 'erase',
+    point,
+    radius: shapeSettings.brushRadius,
+    falloffOffset: shapeSettings.falloffOffset,
+  });
+}
+
+function replayMaskActions(): void {
+  for (let i = 0; i < maskActions.length; i += 1) {
+    const action = maskActions[i];
+    if (action.kind === 'paint') {
+      engine.paintMask(action.point, action.radius, action.falloffOffset);
+    } else if (action.kind === 'erase') {
+      engine.eraseMask(action.point, action.radius, action.falloffOffset);
+    } else if (action.kind === 'blur') {
+      engine.blurMask(action.strength);
+    }
+  }
+}
+
+function clearMaskActionHistory(): void {
+  maskActions.length = 0;
 }
 
 function syncGeometryWithEngine(): void {
@@ -601,7 +637,10 @@ function exitMaskMode(): void {
   syncUiState();
 }
 
-function resetSimulation(): void {
+function resetSimulation(preserveMask = true): void {
+  if (!preserveMask) {
+    clearMaskActionHistory();
+  }
   const nextGeometry = buildScaledShapeGeometry();
   prepareGeometry(nextGeometry);
   const previousGeometry = mesh.geometry;
@@ -610,6 +649,9 @@ function resetSimulation(): void {
   previousGeometry.dispose();
   engine.reseed(simulationSettings.seed);
   engine.setGeometry(nextGeometry);
+  if (preserveMask && maskActions.length > 0) {
+    replayMaskActions();
+  }
   syncGeometryWithEngine();
   if (appState.running) {
     finalSmoothingSource = null;
@@ -643,7 +685,7 @@ function scheduleShapeReset(): void {
   shapeResetQueued = true;
   requestAnimationFrame(() => {
     shapeResetQueued = false;
-    resetSimulation();
+    resetSimulation(false);
   });
 }
 
@@ -1143,11 +1185,11 @@ ui.gradientType.addEventListener('change', () => {
 
 ui.baseShape.addEventListener('change', () => {
   shapeSettings.baseShape = ui.baseShape.value as BaseShape;
-  resetSimulation();
+  resetSimulation(false);
 });
 ui.transformOrder.addEventListener('change', () => {
   shapeSettings.transformOrder = ui.transformOrder.value as TransformOrder;
-  resetSimulation();
+  resetSimulation(false);
 });
 ui.subdivision.addEventListener('pointerdown', () => {
   setSubdivisionWireframePreview(true);
@@ -1214,6 +1256,7 @@ ui.blurMask.addEventListener('click', () => {
     stopSimulation();
   }
   engine.blurMask(FIXED_MASK_BLUR_STRENGTH);
+  maskActions.push({ kind: 'blur', strength: FIXED_MASK_BLUR_STRENGTH });
   enterMaskMode();
 });
 
@@ -1222,6 +1265,7 @@ ui.clearMask.addEventListener('click', () => {
     stopSimulation();
   }
   engine.clearMask();
+  clearMaskActionHistory();
   enterMaskMode();
 });
 
