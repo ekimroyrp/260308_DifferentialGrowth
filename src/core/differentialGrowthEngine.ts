@@ -18,8 +18,8 @@ export class DifferentialGrowthEngine {
   private basePositions: Float32Array;
   private curvatureWork: Float32Array;
   private deltaWork: Float32Array;
+  private smoothWork: Float32Array;
   private rng: SeededRng;
-  private subdivisionCooldown: number;
 
   constructor(geometry: BufferGeometry, settings: GrowthSettings, seed: number) {
     this.geometry = geometry;
@@ -32,8 +32,8 @@ export class DifferentialGrowthEngine {
     this.basePositions = new Float32Array();
     this.curvatureWork = new Float32Array();
     this.deltaWork = new Float32Array();
+    this.smoothWork = new Float32Array();
     this.rng = new SeededRng(seed);
-    this.subdivisionCooldown = 0;
     this.setGeometry(geometry);
   }
 
@@ -60,7 +60,7 @@ export class DifferentialGrowthEngine {
     this.basePositions = Float32Array.from(this.positionAttr.array as ArrayLike<number>);
     this.curvatureWork = new Float32Array(this.positionAttr.count);
     this.deltaWork = new Float32Array(this.positionAttr.count * 3);
-    this.subdivisionCooldown = 0;
+    this.smoothWork = new Float32Array(this.positionAttr.count * 3);
     this.updateCurvatureAttribute();
   }
 
@@ -164,13 +164,21 @@ export class DifferentialGrowthEngine {
     const subSteps = Math.max(1, Math.round(growthSpeed * 2));
     const scaledDt = safeDt * growthSpeed / subSteps;
     for (let i = 0; i < subSteps; i += 1) {
+      // Differential growth loop: subdivide -> grow/repulse -> relax.
+      let splitPasses = 0;
+      while (splitPasses < 2 && this.maybeSplitLongEdges()) {
+        splitPasses += 1;
+      }
       this.integrate(scaledDt);
+      this.applySurfaceSmoothing(
+        Math.max(1, Math.round(1 + this.settings.smoothing * 3)),
+        MathUtils.clamp(this.settings.smoothing * 0.34, 0, 0.42),
+      );
+      this.geometry.computeVertexNormals();
+      this.normalAttr.needsUpdate = true;
+      this.updateCurvatureAttribute();
+      this.maybeSplitLongEdges();
     }
-
-    this.geometry.computeVertexNormals();
-    this.normalAttr.needsUpdate = true;
-    this.updateCurvatureAttribute();
-    this.maybeSplitLongEdges();
   }
 
   private integrate(dt: number): void {
@@ -225,16 +233,16 @@ export class DifferentialGrowthEngine {
       const index = i * 3;
       const block = 1 - MathUtils.clamp(maskArray[i], 0, 1);
       const curvatureFactor = this.curvatureWork[i] * invCurvature;
-      const noise = this.rng.signed() * 0.12;
+      const noise = this.rng.signed() * 0.02;
       const growth = Math.max(0, growthBase * block * (0.6 + curvatureFactor * 0.95 + noise));
       this.deltaWork[index] += normalArray[index] * growth;
       this.deltaWork[index + 1] += normalArray[index + 1] * growth;
       this.deltaWork[index + 2] += normalArray[index + 2] * growth;
     }
 
-    const edgeStrength = 0.38;
-    const repulsionStrength = this.settings.repulsion * 0.35;
-    const minDistance = this.settings.targetEdgeLength * 0.62;
+    this.applySpatialRepulsion(dt);
+
+    const edgeStrength = 0.52;
     for (let i = 0; i < edges.length; i += 1) {
       const [a, b] = edges[i];
       const ia = a * 3;
@@ -253,10 +261,7 @@ export class DifferentialGrowthEngine {
       tempEdge.multiplyScalar(1 / length);
 
       const edgeTarget = this.settings.targetEdgeLength;
-      let correction = (length - edgeTarget) * edgeStrength * dt;
-      if (length > edgeTarget * this.settings.splitThreshold) {
-        correction *= 1.6;
-      }
+      const correction = (length - edgeTarget) * edgeStrength * dt;
 
       this.deltaWork[ia] += tempEdge.x * correction;
       this.deltaWork[ia + 1] += tempEdge.y * correction;
@@ -264,19 +269,9 @@ export class DifferentialGrowthEngine {
       this.deltaWork[ib] -= tempEdge.x * correction;
       this.deltaWork[ib + 1] -= tempEdge.y * correction;
       this.deltaWork[ib + 2] -= tempEdge.z * correction;
-
-      if (repulsionStrength > 0 && length < minDistance) {
-        const push = ((minDistance - length) / minDistance) * repulsionStrength * dt;
-        this.deltaWork[ia] -= tempEdge.x * push;
-        this.deltaWork[ia + 1] -= tempEdge.y * push;
-        this.deltaWork[ia + 2] -= tempEdge.z * push;
-        this.deltaWork[ib] += tempEdge.x * push;
-        this.deltaWork[ib + 1] += tempEdge.y * push;
-        this.deltaWork[ib + 2] += tempEdge.z * push;
-      }
     }
 
-    const smoothingStrength = this.settings.smoothing * 0.42 * dt;
+    const smoothingStrength = this.settings.smoothing * 0.26 * dt;
     for (let i = 0; i < vertexCount; i += 1) {
       const neighbors = adjacency[i];
       if (!neighbors || neighbors.length === 0) {
@@ -304,31 +299,171 @@ export class DifferentialGrowthEngine {
       }
     }
 
-    for (let i = 0; i < positionArray.length; i += 1) {
-      positionArray[i] += this.deltaWork[i];
+    const maxDisplacement = this.settings.targetEdgeLength * 0.24;
+    for (let i = 0; i < vertexCount; i += 1) {
+      const index = i * 3;
+      const dx = this.deltaWork[index];
+      const dy = this.deltaWork[index + 1];
+      const dz = this.deltaWork[index + 2];
+      const length = Math.sqrt(dx * dx + dy * dy + dz * dz);
+      if (length > maxDisplacement && length > 1e-8) {
+        const scale = maxDisplacement / length;
+        positionArray[index] += dx * scale;
+        positionArray[index + 1] += dy * scale;
+        positionArray[index + 2] += dz * scale;
+      } else {
+        positionArray[index] += dx;
+        positionArray[index + 1] += dy;
+        positionArray[index + 2] += dz;
+      }
     }
     this.positionAttr.needsUpdate = true;
   }
 
-  private maybeSplitLongEdges(): void {
-    if (this.subdivisionCooldown > 0) {
-      this.subdivisionCooldown -= 1;
+  private applySpatialRepulsion(dt: number): void {
+    const repulsionFactor = this.settings.repulsion;
+    if (repulsionFactor <= 0) {
       return;
     }
 
+    const radius = this.settings.targetEdgeLength * this.settings.splitThreshold * 1.35;
+    if (radius <= 1e-7) {
+      return;
+    }
+    const radiusSq = radius * radius;
+    const positionArray = this.positionAttr.array as Float32Array;
+    const vertexCount = this.positionAttr.count;
+    const cellSize = radius;
+    const invCell = 1 / cellSize;
+    const grid = new Map<string, number[]>();
+
+    for (let i = 0; i < vertexCount; i += 1) {
+      const index = i * 3;
+      const cx = Math.floor(positionArray[index] * invCell);
+      const cy = Math.floor(positionArray[index + 1] * invCell);
+      const cz = Math.floor(positionArray[index + 2] * invCell);
+      const key = `${cx}|${cy}|${cz}`;
+      const bucket = grid.get(key);
+      if (bucket) {
+        bucket.push(i);
+      } else {
+        grid.set(key, [i]);
+      }
+    }
+
+    const strength = repulsionFactor * dt * 0.03;
+    for (let i = 0; i < vertexCount; i += 1) {
+      const ia = i * 3;
+      const px = positionArray[ia];
+      const py = positionArray[ia + 1];
+      const pz = positionArray[ia + 2];
+      const cx = Math.floor(px * invCell);
+      const cy = Math.floor(py * invCell);
+      const cz = Math.floor(pz * invCell);
+
+      for (let ox = -1; ox <= 1; ox += 1) {
+        for (let oy = -1; oy <= 1; oy += 1) {
+          for (let oz = -1; oz <= 1; oz += 1) {
+            const key = `${cx + ox}|${cy + oy}|${cz + oz}`;
+            const bucket = grid.get(key);
+            if (!bucket) {
+              continue;
+            }
+
+            for (let bi = 0; bi < bucket.length; bi += 1) {
+              const j = bucket[bi];
+              if (j <= i) {
+                continue;
+              }
+              const ib = j * 3;
+              const dx = px - positionArray[ib];
+              const dy = py - positionArray[ib + 1];
+              const dz = pz - positionArray[ib + 2];
+              const distSq = dx * dx + dy * dy + dz * dz;
+              if (distSq >= radiusSq || distSq <= 1e-12) {
+                continue;
+              }
+              const dist = Math.sqrt(distSq);
+              const invDist = 1 / dist;
+              const falloff = 1 - dist / radius;
+              const force = (strength * falloff) / (distSq + 1e-6);
+              const fx = dx * invDist * force;
+              const fy = dy * invDist * force;
+              const fz = dz * invDist * force;
+
+              this.deltaWork[ia] += fx;
+              this.deltaWork[ia + 1] += fy;
+              this.deltaWork[ia + 2] += fz;
+              this.deltaWork[ib] -= fx;
+              this.deltaWork[ib + 1] -= fy;
+              this.deltaWork[ib + 2] -= fz;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  private applySurfaceSmoothing(iterations: number, amount: number): void {
+    if (iterations <= 0 || amount <= 0) {
+      return;
+    }
+
+    const positionArray = this.positionAttr.array as Float32Array;
+    const adjacency = this.topology.adjacency;
+    const vertexCount = this.positionAttr.count;
+    const blend = MathUtils.clamp(amount, 0, 0.45);
+    const oneMinus = 1 - blend;
+
+    for (let iter = 0; iter < iterations; iter += 1) {
+      for (let i = 0; i < vertexCount; i += 1) {
+        const neighbors = adjacency[i];
+        const index = i * 3;
+        if (!neighbors || neighbors.length === 0) {
+          this.smoothWork[index] = positionArray[index];
+          this.smoothWork[index + 1] = positionArray[index + 1];
+          this.smoothWork[index + 2] = positionArray[index + 2];
+          continue;
+        }
+
+        let avgX = 0;
+        let avgY = 0;
+        let avgZ = 0;
+        for (let j = 0; j < neighbors.length; j += 1) {
+          const ni = neighbors[j] * 3;
+          avgX += positionArray[ni];
+          avgY += positionArray[ni + 1];
+          avgZ += positionArray[ni + 2];
+        }
+        const inv = 1 / neighbors.length;
+        avgX *= inv;
+        avgY *= inv;
+        avgZ *= inv;
+        this.smoothWork[index] = positionArray[index] * oneMinus + avgX * blend;
+        this.smoothWork[index + 1] = positionArray[index + 1] * oneMinus + avgY * blend;
+        this.smoothWork[index + 2] = positionArray[index + 2] * oneMinus + avgZ * blend;
+      }
+
+      positionArray.set(this.smoothWork);
+    }
+
+    this.positionAttr.needsUpdate = true;
+  }
+
+  private maybeSplitLongEdges(): boolean {
     const vertexCount = this.positionAttr.count;
     if (vertexCount >= this.settings.maxVertices) {
-      return;
+      return false;
     }
 
     // Full split pass can roughly quadruple vertices before merge.
     if (vertexCount * 4 > this.settings.maxVertices) {
-      return;
+      return false;
     }
 
     const splitLength = this.settings.targetEdgeLength * this.settings.splitThreshold;
     if (splitLength <= 0) {
-      return;
+      return false;
     }
 
     const positionArray = this.positionAttr.array as Float32Array;
@@ -347,11 +482,11 @@ export class DifferentialGrowthEngine {
     }
 
     if (longestEdge <= splitLength) {
-      return;
+      return false;
     }
 
     this.subdivideGeometryOnce();
-    this.subdivisionCooldown = 8;
+    return true;
   }
 
   private subdivideGeometryOnce(): void {
