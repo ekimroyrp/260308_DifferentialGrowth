@@ -60,22 +60,19 @@ export class MaterialController {
         uniform vec3 uLightDirB;
 
         void main() {
-          if (uViewMode > 0.5) {
-            float shade = clamp(1.0 - vMask, 0.0, 1.0);
-            gl_FragColor = vec4(vec3(shade), 1.0);
-            return;
-          }
-
           vec3 n = normalize(vNormal);
           vec3 viewDir = normalize(cameraPosition - vWorldPos);
           vec3 lightA = normalize(uLightDirA);
           vec3 lightB = normalize(uLightDirB);
 
+          float maskView = step(0.5, uViewMode);
+          float maskShade = clamp(1.0 - vMask, 0.0, 1.0);
           float curvature = clamp(vCurvature * uCurvatureContrast + uCurvatureBias, 0.0, 1.0);
           float displacement = clamp(vDisplacement * uCurvatureContrast + uCurvatureBias, 0.0, 1.0);
           vec3 curvatureColor = mix(uGradientStart, uGradientEnd, curvature);
           vec3 displacementColor = mix(uGradientStart, uGradientEnd, displacement);
-          vec3 baseColor = mix(curvatureColor, displacementColor, step(0.5, uGradientType));
+          vec3 growthColor = mix(curvatureColor, displacementColor, step(0.5, uGradientType));
+          vec3 baseColor = mix(growthColor, vec3(maskShade), maskView);
 
           float wrap = 0.32;
           float diffA = max((dot(n, lightA) + wrap) / (1.0 + wrap), 0.0);
@@ -84,10 +81,12 @@ export class MaterialController {
           float specA = pow(max(dot(reflect(-lightA, n), viewDir), 0.0), 76.0);
           float specB = pow(max(dot(reflect(-lightB, n), viewDir), 0.0), 32.0);
           float fresnel = pow(1.0 - max(dot(n, viewDir), 0.0), 3.0);
+          float specularScale = mix(uSpecular, 0.0, maskView);
+          float fresnelScale = mix(uFresnel, 0.22, maskView);
 
           vec3 color = baseColor * (0.14 + 0.88 * (diffA * 0.9 + diffB * 0.5));
-          color += vec3(1.0) * (specA + specB * 0.4) * uSpecular;
-          color += baseColor * fresnel * uFresnel;
+          color += vec3(1.0) * (specA + specB * 0.4) * specularScale;
+          color += baseColor * fresnel * fresnelScale;
           color = mix(color, color * color * 1.25, 0.26);
 
           gl_FragColor = vec4(color, 1.0);

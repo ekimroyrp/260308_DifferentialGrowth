@@ -424,7 +424,7 @@ let timelineStepDirty = false;
 resetTimelineToCurrentState();
 
 function syncWireframeVisibility(): void {
-  wireframeMesh.visible = shapeSettings.showWireframe || subdivisionWireframePreviewActive;
+  wireframeMesh.visible = appState.viewMode === 'mask' || shapeSettings.showWireframe || subdivisionWireframePreviewActive;
 }
 
 function setSubdivisionWireframePreview(active: boolean): void {
@@ -745,6 +745,7 @@ function setViewMode(mode: ViewMode): void {
   appState.viewMode = mode;
   materialController.setViewMode(mode);
   ui.maskMode.classList.toggle('is-mask-active', mode === 'mask');
+  syncWireframeVisibility();
 }
 
 function startSimulation(): void {
