@@ -299,6 +299,16 @@ export class DifferentialGrowthEngine {
       }
     }
 
+    // Mask semantics: scale total vertex displacement budget.
+    // black (1.0) => 0x movement, gray => proportional movement, white (0.0) => full movement.
+    for (let i = 0; i < vertexCount; i += 1) {
+      const mobility = 1 - MathUtils.clamp(maskArray[i], 0, 1);
+      const index = i * 3;
+      this.deltaWork[index] *= mobility;
+      this.deltaWork[index + 1] *= mobility;
+      this.deltaWork[index + 2] *= mobility;
+    }
+
     const maxDisplacement = this.settings.targetEdgeLength * 0.24;
     for (let i = 0; i < vertexCount; i += 1) {
       const index = i * 3;
@@ -410,10 +420,10 @@ export class DifferentialGrowthEngine {
     }
 
     const positionArray = this.positionAttr.array as Float32Array;
+    const maskArray = this.maskAttr.array as Float32Array;
     const adjacency = this.topology.adjacency;
     const vertexCount = this.positionAttr.count;
     const blend = MathUtils.clamp(amount, 0, 0.45);
-    const oneMinus = 1 - blend;
 
     for (let iter = 0; iter < iterations; iter += 1) {
       for (let i = 0; i < vertexCount; i += 1) {
@@ -439,9 +449,12 @@ export class DifferentialGrowthEngine {
         avgX *= inv;
         avgY *= inv;
         avgZ *= inv;
-        this.smoothWork[index] = positionArray[index] * oneMinus + avgX * blend;
-        this.smoothWork[index + 1] = positionArray[index + 1] * oneMinus + avgY * blend;
-        this.smoothWork[index + 2] = positionArray[index + 2] * oneMinus + avgZ * blend;
+        const inhibition = MathUtils.clamp(maskArray[i], 0, 1);
+        const localBlend = blend * (1 - inhibition);
+        const oneMinus = 1 - localBlend;
+        this.smoothWork[index] = positionArray[index] * oneMinus + avgX * localBlend;
+        this.smoothWork[index + 1] = positionArray[index + 1] * oneMinus + avgY * localBlend;
+        this.smoothWork[index + 2] = positionArray[index + 2] * oneMinus + avgZ * localBlend;
       }
 
       positionArray.set(this.smoothWork);

@@ -59,6 +59,85 @@ describe('DifferentialGrowthEngine mask operations', () => {
     const maxAfterClear = Math.max(...(maskAttr.array as Float32Array));
     expect(maxAfterClear).toBe(0);
   });
+
+  it('black mask suppresses vertex movement in painted region during growth step', () => {
+    const geometry = buildShapeGeometry('sphere');
+    const engine = new DifferentialGrowthEngine(
+      geometry,
+      {
+        ...growthSettings,
+        growthStep: 0.6,
+        repulsion: 0.8,
+        smoothing: 0.8,
+      },
+      777,
+    );
+
+    engine.paintMask(new Vector3(0, 0, 1.15), 0.32, 0);
+    const positionAttr = geometry.getAttribute('position') as BufferAttribute;
+    const before = Float32Array.from(positionAttr.array as Float32Array);
+    const mask = (geometry.getAttribute('aMask') as BufferAttribute).array as Float32Array;
+
+    engine.step(0.02, 1.2);
+
+    const after = positionAttr.array as Float32Array;
+    let maxMove = 0;
+    for (let i = 0; i < mask.length; i += 1) {
+      if (mask[i] < 0.99) {
+        continue;
+      }
+      const idx = i * 3;
+      const dx = after[idx] - before[idx];
+      const dy = after[idx + 1] - before[idx + 1];
+      const dz = after[idx + 2] - before[idx + 2];
+      const move = Math.sqrt(dx * dx + dy * dy + dz * dz);
+      if (move > maxMove) {
+        maxMove = move;
+      }
+    }
+
+    expect(maxMove).toBeLessThan(5e-5);
+  });
+
+  it('uniform gray mask scales movement proportionally', () => {
+    const geometryA = buildShapeGeometry('sphere');
+    const geometryB = geometryA.clone();
+    geometryB.computeVertexNormals();
+    const engineA = new DifferentialGrowthEngine(geometryA, growthSettings, 909);
+    const engineB = new DifferentialGrowthEngine(geometryB, growthSettings, 909);
+
+    const maskB = (geometryB.getAttribute('aMask') as BufferAttribute).array as Float32Array;
+    maskB.fill(0.5);
+    (geometryB.getAttribute('aMask') as BufferAttribute).needsUpdate = true;
+
+    const beforeA = Float32Array.from((geometryA.getAttribute('position') as BufferAttribute).array as Float32Array);
+    const beforeB = Float32Array.from((geometryB.getAttribute('position') as BufferAttribute).array as Float32Array);
+    engineA.step(0.02, 1);
+    engineB.step(0.02, 1);
+    const afterA = (geometryA.getAttribute('position') as BufferAttribute).array as Float32Array;
+    const afterB = (geometryB.getAttribute('position') as BufferAttribute).array as Float32Array;
+
+    let totalA = 0;
+    let totalB = 0;
+    let count = 0;
+    for (let i = 0; i < afterA.length; i += 3) {
+      const dax = afterA[i] - beforeA[i];
+      const day = afterA[i + 1] - beforeA[i + 1];
+      const daz = afterA[i + 2] - beforeA[i + 2];
+      totalA += Math.sqrt(dax * dax + day * day + daz * daz);
+      const dbx = afterB[i] - beforeB[i];
+      const dby = afterB[i + 1] - beforeB[i + 1];
+      const dbz = afterB[i + 2] - beforeB[i + 2];
+      totalB += Math.sqrt(dbx * dbx + dby * dby + dbz * dbz);
+      count += 1;
+    }
+
+    const avgA = totalA / Math.max(count, 1);
+    const avgB = totalB / Math.max(count, 1);
+    const ratio = avgA > 1e-8 ? avgB / avgA : 0;
+    expect(ratio).toBeGreaterThan(0.35);
+    expect(ratio).toBeLessThan(0.65);
+  });
 });
 
 describe('DifferentialGrowthEngine adaptive splitting', () => {
