@@ -1,22 +1,19 @@
 # 260308_DifferentialGrowth
 
-260308_DifferentialGrowth is a Three.js-based interactive 3D differential growth simulator. It includes a draggable control panel, base shape selection, curvature-gradient shading, and mask painting tools that let you block growth in selected mesh regions and preview the mask in grayscale mode.
+260308_DifferentialGrowth is a Three.js-based interactive 3D differential growth simulator with adaptive remeshing, mask-driven growth control, timeline scrubbing, and mesh export tools. It includes a draggable/collapsible control panel, multiple procedural start shapes, and gradient shading modes for both curvature and displacement.
 
 ## Features
-- Real-time differential growth simulation on triangle meshes
-- Adaptive edge splitting/remeshing with max-vertex cap enforcement
-- Base shape selection: `Cube`, `Sphere`, `Torus`
-- Shape `Subdivision` slider for denser starting meshes and smoother growth
-- Draggable/collapsible UI panel with grouped settings:
-  - `Simulation` (Start/Stop, Mask mode, Reset, Growth Speed, Seed)
-  - `Shape` (base shape, brush radius, falloff offset, blur mask controls)
-  - `Growth` (growth step, edge target, split threshold, repulsion, smoothing, shape retention, max vertices)
-  - `Materials` (gradient start/end colors, curvature and shading controls, bloom, exposure)
-- Mask painting mode:
-  - `Mask` button pauses simulation and switches shader to grayscale mask preview
-  - Left-click paint applies black core with smooth falloff ring (paused mask mode only)
-  - `Start` resumes simulation and restores curvature-based shading
-- Postprocessing pipeline with bloom and FXAA
+- Real-time differential growth simulation on triangle meshes with adaptive loop behavior (split -> grow/repulse -> relax).
+- Adaptive edge splitting/remeshing with max-vertex cap enforcement to support growing surface detail.
+- Expanded base shape library: `Sphere`, `Quad Sphere`, `Polyhedron`, `Cube`, `Rounded Cube`, `Torus`, `Pyramid`, `Cone`, `Cylinder`.
+- Shape setup controls: `Start Subdivision`, `Scale X/Y/Z`, `Rotate X/Y/Z`, `Transform Order`, `Reset Subdivision`, `Reset Transform`.
+- Simulation controls: `Start/Pause`, `Reset`, `Simulation Rate`, and `Simulation Timeline` scrubbing (resume continues from scrubbed step).
+- Dedicated `Mask` section with `Enter/Exit Mask Mode`, brush radius/falloff, `Blur Mask`, and `Clear Mask`.
+- Mask mode visualization uses lit grayscale shading plus forced wireframe for better surface readability while painting.
+- Material controls: `Gradient Type` (`Displacement` or `Curvature`), gradient colors, `Gradient Contrast`, `Gradient Bias`, `Gradient Blur`, `Fresnel`, `Specular`, and `Bloom`.
+- Export section with `Export OBJ` and `Export GLB`, both including baked per-vertex colors from the current visualization state.
+- Draggable/collapsible UI with collapsible sections and custom-styled dropdown controls.
+- Post-processing pipeline with bloom and FXAA.
 
 ## Getting Started
 1. Clone this repository.
@@ -26,7 +23,9 @@
    - `npm run dev`
 4. Build production bundle:
    - `npm run build`
-5. Run tests:
+5. Preview production build locally:
+   - `npm run preview`
+6. Run tests:
    - `npm test`
 
 ## Controls
@@ -34,10 +33,24 @@
   - `Wheel` = Zoom
   - `MMB` = Pan
   - `RMB` = Orbit
-- Painting:
-  - Click `Mask` to enter mask mode (auto-pauses simulation)
-  - `LMB` on mesh paints growth-blocking mask
 - Simulation:
-  - `Start` runs simulation and exits mask visualization
-  - `Stop` pauses simulation
-  - `Reset` rebuilds the selected start shape and clears the mask
+  - `Start` runs simulation
+  - `Pause` stops simulation updates and enables timeline scrubbing
+  - `Reset` rebuilds the current shape setup and resets timeline history to step 0
+  - `Simulation Timeline` lets you scrub through recorded steps while paused; pressing `Start` resumes from the selected step
+- Painting:
+  - Click `Enter Mask Mode` to pause simulation and switch to mask visualization
+  - `LMB` paints mask, `Shift + LMB` erases mask
+  - `Blur Mask` smooths mask gradients, `Clear Mask` removes current mask
+  - `Exit Mask Mode` (or `Start`) returns to regular shader view
+- Shape:
+  - Use base shape/dropdowns/sliders to configure initial topology and transforms before or between runs
+  - `Show Mesh` toggles shaded mesh visibility, `Show Wireframe` toggles wire overlay (wireframe is forced on in mask mode)
+- Export:
+  - `Export OBJ` downloads an OBJ with vertex colors
+  - `Export GLB` downloads a GLB with vertex colors
+
+## Deployment
+- **Local production preview:** `npm install`, then `npm run build` followed by `npm run preview` to inspect the compiled bundle.
+- **Publish to GitHub Pages:** From a clean `main`, run `npm run build -- --base=./`. Checkout (or create) the `gh-pages` branch in a separate worktree/clone, copy everything inside `dist/` plus a `.nojekyll` marker to its root (and keep the minimal deploy layout such as `assets/`, `env/`, and `index.html`), commit with a descriptive message, `git push origin gh-pages`, then switch back to `main`.
+- **Live demo:** https://ekimroyrp.github.io/260308_DifferentialGrowth/
