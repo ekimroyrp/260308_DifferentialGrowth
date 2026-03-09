@@ -114,6 +114,7 @@ type UiRefs = {
   bloomValue: HTMLSpanElement;
   exportObj: HTMLButtonElement;
   exportGlb: HTMLButtonElement;
+  exportScreenshot: HTMLButtonElement;
   overlay: SVGSVGElement;
   brushCircle: SVGCircleElement;
   falloffCircle: SVGCircleElement;
@@ -271,6 +272,7 @@ const ui: UiRefs = {
   bloomValue: requiredElement('bloom-value', isSpan),
   exportObj: requiredElement('export-obj', isButton),
   exportGlb: requiredElement('export-glb', isButton),
+  exportScreenshot: requiredElement('export-screenshot', isButton),
   overlay: requiredElement('brush-overlay', isSvg),
   brushCircle: requiredElement('brush-circle', isSvgCircle),
   falloffCircle: requiredElement('falloff-circle', isSvgCircle),
@@ -991,6 +993,10 @@ function downloadObj(filename: string, content: string): void {
 
 function downloadBinary(filename: string, data: ArrayBuffer, mimeType: string): void {
   const blob = new Blob([data], { type: mimeType });
+  downloadBlob(filename, blob);
+}
+
+function downloadBlob(filename: string, blob: Blob): void {
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
@@ -1001,6 +1007,18 @@ function downloadBinary(filename: string, data: ArrayBuffer, mimeType: string): 
   window.setTimeout(() => {
     URL.revokeObjectURL(url);
   }, 0);
+}
+
+function exportScreenshot(filename: string): void {
+  // Render a fresh frame so the capture reflects the latest state.
+  composer.render();
+  renderer.domElement.toBlob((blob) => {
+    if (!blob) {
+      console.error('Screenshot export failed: unable to encode canvas as PNG.');
+      return;
+    }
+    downloadBlob(filename, blob);
+  }, 'image/png');
 }
 
 function exportCurrentMeshAsGlb(filename: string): void {
@@ -1938,6 +1956,10 @@ ui.exportObj.addEventListener('click', () => {
 
 ui.exportGlb.addEventListener('click', () => {
   exportCurrentMeshAsGlb(`differential-growth-step-${currentTimelineStep}.glb`);
+});
+
+ui.exportScreenshot.addEventListener('click', () => {
+  exportScreenshot(`differential-growth-step-${currentTimelineStep}.png`);
 });
 
 ui.start.addEventListener('click', () => {
