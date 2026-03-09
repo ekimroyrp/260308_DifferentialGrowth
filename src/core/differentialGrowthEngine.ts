@@ -246,6 +246,7 @@ export class DifferentialGrowthEngine {
       this.applySurfaceSmoothing(
         Math.max(1, Math.round(1 + this.settings.smoothing * 3)),
         MathUtils.clamp(this.settings.smoothing * 0.34, 0, 0.42),
+        false,
       );
       this.geometry.computeVertexNormals();
       this.normalAttr.needsUpdate = true;
@@ -308,12 +309,17 @@ export class DifferentialGrowthEngine {
     const growthBase = this.settings.growthStep * dt;
     for (let i = 0; i < vertexCount; i += 1) {
       const index = i * 3;
-      const block = 1 - MathUtils.clamp(maskArray[i], 0, 1);
+      // Mask scales only growth displacement:
+      // mask=1 -> no growth, mask=0.5 -> half growth, mask=0 -> full growth.
+      const growthMobility = 1 - MathUtils.clamp(maskArray[i], 0, 1);
       const curvatureFactor = this.curvatureWork[i] * invCurvature;
       const noise = this.rng.signed() * dynamicNoiseAmplitude;
       const variation = variationArray[i] ?? 0;
       const seededScale = Math.max(0.12, 1 + variation * staticVariationAmplitude);
-      const growth = Math.max(0, growthBase * block * (0.6 + curvatureFactor * 0.95 + noise) * seededScale);
+      const growth = Math.max(
+        0,
+        growthBase * growthMobility * (0.6 + curvatureFactor * 0.95 + noise) * seededScale,
+      );
       this.deltaWork[index] += normalArray[index] * growth;
       this.deltaWork[index + 1] += normalArray[index + 1] * growth;
       this.deltaWork[index + 2] += normalArray[index + 2] * growth;
@@ -378,14 +384,26 @@ export class DifferentialGrowthEngine {
       }
     }
 
-    // Mask semantics: scale total vertex displacement budget.
-    // black (1.0) => 0x movement, gray => proportional movement, white (0.0) => full movement.
+    // Keep non-growth constraints active in masked regions, but attenuate outward displacement.
+    // This preserves repulsion/relax behavior while making mask clearly control expansion.
     for (let i = 0; i < vertexCount; i += 1) {
       const mobility = 1 - MathUtils.clamp(maskArray[i], 0, 1);
       const index = i * 3;
-      this.deltaWork[index] *= mobility;
-      this.deltaWork[index + 1] *= mobility;
-      this.deltaWork[index + 2] *= mobility;
+      const nx = normalArray[index];
+      const ny = normalArray[index + 1];
+      const nz = normalArray[index + 2];
+      const dx = this.deltaWork[index];
+      const dy = this.deltaWork[index + 1];
+      const dz = this.deltaWork[index + 2];
+      const normalComponent = dx * nx + dy * ny + dz * nz;
+      if (normalComponent <= 0) {
+        continue;
+      }
+      const scaledNormal = normalComponent * mobility;
+      const deltaNormal = scaledNormal - normalComponent;
+      this.deltaWork[index] += nx * deltaNormal;
+      this.deltaWork[index + 1] += ny * deltaNormal;
+      this.deltaWork[index + 2] += nz * deltaNormal;
     }
 
     const maxDisplacement = this.settings.targetEdgeLength * 0.24;

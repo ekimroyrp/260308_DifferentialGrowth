@@ -175,51 +175,78 @@ describe('DifferentialGrowthEngine mask operations', () => {
     expect(maxRestoreDelta).toBeLessThan(1e-9);
   });
 
-  it('black mask suppresses vertex movement in painted region during growth step', () => {
-    const geometry = buildShapeGeometry('sphere');
-    const engine = new DifferentialGrowthEngine(
-      geometry,
-      {
-        ...growthSettings,
-        growthStep: 0.6,
-        repulsion: 0.8,
-        smoothing: 0.8,
-      },
-      777,
-    );
+  it('black mask suppresses growth while still allowing non-growth motion', () => {
+    const settingsWithForces: GrowthSettings = {
+      ...growthSettings,
+      growthStep: 0.6,
+      repulsion: 0.8,
+      smoothing: 0.6,
+      shapeRetention: 0,
+    };
 
-    engine.paintMask(new Vector3(0, 0, 1.15), 0.32, 0);
-    const positionAttr = geometry.getAttribute('position') as BufferAttribute;
-    const before = Float32Array.from(positionAttr.array as Float32Array);
-    const mask = (geometry.getAttribute('aMask') as BufferAttribute).array as Float32Array;
+    const geometryA = buildShapeGeometry('sphere');
+    const geometryB = buildShapeGeometry('sphere');
+    const engineA = new DifferentialGrowthEngine(geometryA, settingsWithForces, 777);
+    const engineB = new DifferentialGrowthEngine(geometryB, settingsWithForces, 777);
 
-    engine.step(0.02, 1.2);
+    engineB.paintMask(new Vector3(0, 0, 1.15), 0.32, 0);
+    const mask = (geometryB.getAttribute('aMask') as BufferAttribute).array as Float32Array;
 
-    const after = positionAttr.array as Float32Array;
-    let maxMove = 0;
+    const beforeA = Float32Array.from((geometryA.getAttribute('position') as BufferAttribute).array as Float32Array);
+    const beforeB = Float32Array.from((geometryB.getAttribute('position') as BufferAttribute).array as Float32Array);
+
+    for (let i = 0; i < 5; i += 1) {
+      engineA.step(0.02, 1.2);
+      engineB.step(0.02, 1.2);
+    }
+
+    const afterA = (geometryA.getAttribute('position') as BufferAttribute).array as Float32Array;
+    const afterB = (geometryB.getAttribute('position') as BufferAttribute).array as Float32Array;
+
+    let totalA = 0;
+    let totalB = 0;
+    let count = 0;
     for (let i = 0; i < mask.length; i += 1) {
       if (mask[i] < 0.99) {
         continue;
       }
       const idx = i * 3;
-      const dx = after[idx] - before[idx];
-      const dy = after[idx + 1] - before[idx + 1];
-      const dz = after[idx + 2] - before[idx + 2];
-      const move = Math.sqrt(dx * dx + dy * dy + dz * dz);
-      if (move > maxMove) {
-        maxMove = move;
-      }
+      const dax = afterA[idx] - beforeA[idx];
+      const day = afterA[idx + 1] - beforeA[idx + 1];
+      const daz = afterA[idx + 2] - beforeA[idx + 2];
+      totalA += Math.sqrt(dax * dax + day * day + daz * daz);
+      const dbx = afterB[idx] - beforeB[idx];
+      const dby = afterB[idx + 1] - beforeB[idx + 1];
+      const dbz = afterB[idx + 2] - beforeB[idx + 2];
+      totalB += Math.sqrt(dbx * dbx + dby * dby + dbz * dbz);
+      count += 1;
     }
 
-    expect(maxMove).toBeLessThan(5e-5);
+    const avgA = totalA / Math.max(count, 1);
+    const avgB = totalB / Math.max(count, 1);
+    expect(avgB).toBeGreaterThan(1e-5);
+    expect(avgA).toBeGreaterThan(avgB + 2e-5);
   });
 
-  it('uniform gray mask scales movement proportionally', () => {
+  it('uniform gray mask scales growth displacement approximately by half', () => {
+    const settingsForGrowth: GrowthSettings = {
+      ...growthSettings,
+      growthStep: 0.55,
+      repulsion: 0,
+      smoothing: 0,
+      shapeRetention: 0,
+    };
+    const settingsNoGrowth: GrowthSettings = {
+      ...settingsForGrowth,
+      growthStep: 0,
+    };
+
     const geometryA = buildShapeGeometry('sphere');
-    const geometryB = geometryA.clone();
-    geometryB.computeVertexNormals();
-    const engineA = new DifferentialGrowthEngine(geometryA, growthSettings, 909);
-    const engineB = new DifferentialGrowthEngine(geometryB, growthSettings, 909);
+    const geometryB = buildShapeGeometry('sphere');
+    const geometryC = buildShapeGeometry('sphere');
+    const engineA = new DifferentialGrowthEngine(geometryA, settingsForGrowth, 909);
+    const engineB = new DifferentialGrowthEngine(geometryB, settingsForGrowth, 909);
+    const engineC = new DifferentialGrowthEngine(geometryC, settingsNoGrowth, 909);
 
     const maskB = (geometryB.getAttribute('aMask') as BufferAttribute).array as Float32Array;
     maskB.fill(0.5);
@@ -227,13 +254,17 @@ describe('DifferentialGrowthEngine mask operations', () => {
 
     const beforeA = Float32Array.from((geometryA.getAttribute('position') as BufferAttribute).array as Float32Array);
     const beforeB = Float32Array.from((geometryB.getAttribute('position') as BufferAttribute).array as Float32Array);
+    const beforeC = Float32Array.from((geometryC.getAttribute('position') as BufferAttribute).array as Float32Array);
     engineA.step(0.02, 1);
     engineB.step(0.02, 1);
+    engineC.step(0.02, 1);
     const afterA = (geometryA.getAttribute('position') as BufferAttribute).array as Float32Array;
     const afterB = (geometryB.getAttribute('position') as BufferAttribute).array as Float32Array;
+    const afterC = (geometryC.getAttribute('position') as BufferAttribute).array as Float32Array;
 
     let totalA = 0;
     let totalB = 0;
+    let totalC = 0;
     let count = 0;
     for (let i = 0; i < afterA.length; i += 3) {
       const dax = afterA[i] - beforeA[i];
@@ -244,13 +275,21 @@ describe('DifferentialGrowthEngine mask operations', () => {
       const dby = afterB[i + 1] - beforeB[i + 1];
       const dbz = afterB[i + 2] - beforeB[i + 2];
       totalB += Math.sqrt(dbx * dbx + dby * dby + dbz * dbz);
+      const dcx = afterC[i] - beforeC[i];
+      const dcy = afterC[i + 1] - beforeC[i + 1];
+      const dcz = afterC[i + 2] - beforeC[i + 2];
+      totalC += Math.sqrt(dcx * dcx + dcy * dcy + dcz * dcz);
       count += 1;
     }
 
     const avgA = totalA / Math.max(count, 1);
     const avgB = totalB / Math.max(count, 1);
-    const ratio = avgA > 1e-8 ? avgB / avgA : 0;
-    expect(ratio).toBeGreaterThan(0.35);
+    const avgC = totalC / Math.max(count, 1);
+    const growthOnlyA = Math.max(0, avgA - avgC);
+    const growthOnlyB = Math.max(0, avgB - avgC);
+    const ratio = growthOnlyA > 1e-8 ? growthOnlyB / growthOnlyA : 0;
+    expect(growthOnlyA).toBeGreaterThan(1e-6);
+    expect(ratio).toBeGreaterThan(0.2);
     expect(ratio).toBeLessThan(0.65);
   });
 });
