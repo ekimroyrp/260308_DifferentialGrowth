@@ -22,7 +22,7 @@ const materialSettings: MaterialSettings = {
   curvatureBias: 0,
   fresnel: 0.6,
   specular: 0.6,
-  bloom: 0.28,
+  bloom: 0,
   exposure: 1.1,
 };
 

@@ -1,4 +1,4 @@
-export type BaseShape = 'cube' | 'sphere' | 'pyramid' | 'torus' | 'dodecahedron';
+export type BaseShape = 'cube' | 'sphere' | 'torus';
 export type ViewMode = 'curvature' | 'mask';
 
 export type SimulationSettings = {
@@ -8,6 +8,7 @@ export type SimulationSettings = {
 
 export type ShapeSettings = {
   baseShape: BaseShape;
+  subdivision: number;
   brushRadius: number;
   falloffOffset: number;
   blurMaskStrength: number;

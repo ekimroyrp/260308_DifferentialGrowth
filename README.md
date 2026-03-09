@@ -5,7 +5,8 @@
 ## Features
 - Real-time differential growth simulation on triangle meshes
 - Adaptive edge splitting/remeshing with max-vertex cap enforcement
-- Base shape selection: `Cube`, `Sphere`, `Pyramid`, `Torus`, `Dodecahedron`
+- Base shape selection: `Cube`, `Sphere`, `Torus`
+- Shape `Subdivision` slider for denser starting meshes and smoother growth
 - Draggable/collapsible UI panel with grouped settings:
   - `Simulation` (Start/Stop, Mask mode, Reset, Growth Speed, Seed)
   - `Shape` (base shape, brush radius, falloff offset, blur mask controls)

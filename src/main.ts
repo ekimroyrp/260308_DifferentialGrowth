@@ -41,6 +41,8 @@ type UiRefs = {
   seed: HTMLInputElement;
   seedValueLabel: HTMLSpanElement;
   baseShape: HTMLSelectElement;
+  subdivision: HTMLInputElement;
+  subdivisionValue: HTMLSpanElement;
   brushRadius: HTMLInputElement;
   brushRadiusValue: HTMLSpanElement;
   falloffOffset: HTMLInputElement;
@@ -148,6 +150,8 @@ const ui: UiRefs = {
   seed: requiredElement('seed-value', isInput),
   seedValueLabel: requiredElement('seed-value-label', isSpan),
   baseShape: requiredElement('base-shape', isSelect),
+  subdivision: requiredElement('subdivision', isInput),
+  subdivisionValue: requiredElement('subdivision-value', isSpan),
   brushRadius: requiredElement('brush-radius', isInput),
   brushRadiusValue: requiredElement('brush-radius-value', isSpan),
   falloffOffset: requiredElement('falloff-offset', isInput),
@@ -202,6 +206,7 @@ const simulationSettings: SimulationSettings = {
 
 const shapeSettings: ShapeSettings = {
   baseShape: ui.baseShape.value as BaseShape,
+  subdivision: Number.parseInt(ui.subdivision.value, 10),
   brushRadius: Number.parseFloat(ui.brushRadius.value),
   falloffOffset: Number.parseFloat(ui.falloffOffset.value),
   blurMaskStrength: Number.parseFloat(ui.blurMaskStrength.value),
@@ -261,7 +266,7 @@ controls.update();
 renderer.domElement.addEventListener('contextmenu', (event) => event.preventDefault());
 
 const materialController = new MaterialController(materialSettings);
-const initialGeometry = buildShapeGeometry(shapeSettings.baseShape);
+const initialGeometry = buildShapeGeometry(shapeSettings.baseShape, shapeSettings.subdivision);
 prepareGeometry(initialGeometry);
 const mesh = new Mesh(initialGeometry, materialController.material);
 scene.add(mesh);
@@ -414,7 +419,7 @@ function enterMaskMode(): void {
 }
 
 function resetSimulation(): void {
-  const nextGeometry = buildShapeGeometry(shapeSettings.baseShape);
+  const nextGeometry = buildShapeGeometry(shapeSettings.baseShape, shapeSettings.subdivision);
   prepareGeometry(nextGeometry);
   mesh.geometry.dispose();
   mesh.geometry = nextGeometry;
@@ -503,6 +508,9 @@ bindRange(ui.seed, ui.seedValueLabel, (value) => `${Math.round(value)}`, (value)
     resetSimulation();
   }
 });
+bindRange(ui.subdivision, ui.subdivisionValue, (value) => `${Math.round(value)}`, (value) => {
+  shapeSettings.subdivision = Math.round(value);
+});
 bindRange(ui.brushRadius, ui.brushRadiusValue, (value) => value.toFixed(2), (value) => {
   shapeSettings.brushRadius = value;
 });
@@ -576,6 +584,9 @@ ui.gradientEnd.addEventListener('input', () => {
 
 ui.baseShape.addEventListener('change', () => {
   shapeSettings.baseShape = ui.baseShape.value as BaseShape;
+  resetSimulation();
+});
+ui.subdivision.addEventListener('change', () => {
   resetSimulation();
 });
 
