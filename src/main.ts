@@ -45,6 +45,7 @@ type UiRefs = {
   start: HTMLButtonElement;
   maskMode: HTMLButtonElement;
   reset: HTMLButtonElement;
+  resetSubdivision: HTMLButtonElement;
   resetTransform: HTMLButtonElement;
   blurMask: HTMLButtonElement;
   clearMask: HTMLButtonElement;
@@ -179,6 +180,7 @@ const ui: UiRefs = {
   start: requiredElement('start-sim', isButton),
   maskMode: requiredElement('mask-mode', isButton),
   reset: requiredElement('reset-sim', isButton),
+  resetSubdivision: requiredElement('reset-subdivision', isButton),
   resetTransform: requiredElement('reset-transform', isButton),
   blurMask: requiredElement('blur-mask', isButton),
   clearMask: requiredElement('clear-mask', isButton),
@@ -1218,11 +1220,18 @@ ui.showMesh.addEventListener('change', () => {
   mesh.visible = shapeSettings.showMesh;
 });
 
+const setRangeValue = (input: HTMLInputElement, value: number): void => {
+  input.value = `${value}`;
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+};
+
+ui.resetSubdivision.addEventListener('click', () => {
+  const defaultSubdivision = Number.parseFloat(ui.subdivision.defaultValue);
+  setRangeValue(ui.subdivision, Number.isFinite(defaultSubdivision) ? defaultSubdivision : 1);
+  setSubdivisionWireframePreview(false);
+});
+
 ui.resetTransform.addEventListener('click', () => {
-  const setRangeValue = (input: HTMLInputElement, value: number): void => {
-    input.value = `${value}`;
-    input.dispatchEvent(new Event('input', { bubbles: true }));
-  };
   setRangeValue(ui.scaleX, 1);
   setRangeValue(ui.scaleY, 1);
   setRangeValue(ui.scaleZ, 1);
