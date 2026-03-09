@@ -126,10 +126,6 @@ body {
   border-radius: 6px;
   padding: 0;
   background: rgba(255, 255, 255, 0.08);
-  color: rgba(255, 255, 255, 0.86);
-  font-size: 0.66rem;
-  font-weight: 700;
-  line-height: 1;
   cursor: pointer;
 }
 
@@ -139,11 +135,16 @@ body {
 
 .collapse-icon {
   display: inline-block;
-  transition: transform 150ms ease;
+  width: 7px;
+  height: 7px;
+  border-right: 1.5px solid rgba(236, 241, 253, 0.92);
+  border-bottom: 1.5px solid rgba(236, 241, 253, 0.92);
+  transform: translateY(1px) rotate(-135deg);
+  transition: transform 180ms ease;
 }
 
 #ui-panel.is-collapsed .collapse-icon {
-  transform: rotate(-90deg);
+  transform: translateY(-1px) rotate(45deg);
 }
 
 #ui-handle-bottom {
@@ -384,7 +385,7 @@ input[type="range"]::-moz-range-thumb {
 select {
   width: 100%;
   min-height: 32px;
-  padding: 0 10px;
+  padding: 0 28px 0 10px;
   border: 1px solid var(--button-stroke);
   border-radius: 10px;
   background: linear-gradient(145deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.08));
@@ -392,11 +393,38 @@ select {
   font-size: 0.78rem;
   font-weight: 510;
   outline: none;
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
 }
 
 select:focus {
   border-color: rgba(203, 217, 255, 0.55);
   box-shadow: 0 0 0 1px rgba(203, 217, 255, 0.18);
+}
+
+.select-shell {
+  position: relative;
+  display: block;
+  width: 100%;
+}
+
+.select-shell::after {
+  content: "";
+  position: absolute;
+  right: 11px;
+  top: 50%;
+  width: 7px;
+  height: 7px;
+  border-right: 1.5px solid rgba(236, 241, 253, 0.92);
+  border-bottom: 1.5px solid rgba(236, 241, 253, 0.92);
+  transform: translateY(-65%) rotate(45deg);
+  transition: transform 180ms ease;
+  pointer-events: none;
+}
+
+.select-control.is-open .select-shell::after {
+  transform: translateY(-35%) rotate(-135deg);
 }
 
 .toggle-control {

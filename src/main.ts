@@ -549,6 +549,42 @@ function bindRange(
   update();
 }
 
+function bindSelectArrow(select: HTMLSelectElement): void {
+  const control = select.closest('.select-control');
+  if (!control) {
+    return;
+  }
+
+  const setOpen = (open: boolean): void => {
+    control.classList.toggle('is-open', open);
+  };
+
+  select.addEventListener('focus', () => {
+    setOpen(true);
+  });
+  select.addEventListener('change', () => {
+    setOpen(false);
+  });
+  select.addEventListener('blur', () => {
+    setOpen(false);
+  });
+  select.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' || event.key === 'Enter' || event.key === 'Tab') {
+      setOpen(false);
+    }
+  });
+  select.addEventListener('pointerdown', () => {
+    if (control.classList.contains('is-open')) {
+      requestAnimationFrame(() => setOpen(false));
+      return;
+    }
+    setOpen(true);
+  });
+}
+
+bindSelectArrow(ui.baseShape);
+bindSelectArrow(ui.gradientType);
+
 bindRange(ui.growthSpeed, ui.growthSpeedValue, (value) => value.toFixed(2), (value) => {
   simulationSettings.growthSpeed = value;
 });

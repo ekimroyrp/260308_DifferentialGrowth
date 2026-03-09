@@ -32,7 +32,7 @@
           aria-label="Collapse controls"
           aria-expanded="true"
         >
-          <span class="collapse-icon">v</span>
+          <span class="collapse-icon" aria-hidden="true"></span>
         </button>
       </div>
       <div class="ui-body panel-sections">
@@ -63,17 +63,19 @@
             <span class="panel-section-label">Shape</span>
           </div>
           <div class="panel-section-content panel-controls-stack">
-            <label class="control">
+            <label class="control select-control">
               <div class="control-row">
                 <span>Base Shape</span>
               </div>
-              <select id="base-shape">
-                <option value="sphere">Sphere</option>
-                <option value="quad-sphere">Quad Sphere</option>
-                <option value="cube">Cube</option>
-                <option value="rounded-cube">Rounded Cube</option>
-                <option value="torus">Torus</option>
-              </select>
+              <span class="select-shell">
+                <select id="base-shape">
+                  <option value="sphere">Sphere</option>
+                  <option value="quad-sphere">Quad Sphere</option>
+                  <option value="cube">Cube</option>
+                  <option value="rounded-cube">Rounded Cube</option>
+                  <option value="torus">Torus</option>
+                </select>
+              </span>
             </label>
 
             <label class="control">
@@ -215,14 +217,16 @@
             <span class="panel-section-label">Materials</span>
           </div>
           <div class="panel-section-content panel-controls-stack">
-            <label class="control">
+            <label class="control select-control">
               <div class="control-row">
                 <span>Gradient Type</span>
               </div>
-              <select id="gradient-type">
-                <option value="displacement" selected>Displacement</option>
-                <option value="curvature">Curvature</option>
-              </select>
+              <span class="select-shell">
+                <select id="gradient-type">
+                  <option value="displacement" selected>Displacement</option>
+                  <option value="curvature">Curvature</option>
+                </select>
+              </span>
             </label>
 
             <div class="control control-grid-2">
