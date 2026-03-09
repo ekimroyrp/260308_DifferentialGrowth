@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
@@ -89,6 +89,11 @@
                 <span id="subdivision-value">35</span>
               </div>
               <input type="range" id="subdivision" min="1" max="100" step="1" value="35" />
+            </label>
+
+            <label class="control compact toggle-control" for="show-wireframe">
+              <span>Show Wireframe</span>
+              <input type="checkbox" id="show-wireframe" />
             </label>
 
             <label class="control">
@@ -190,6 +195,16 @@
             <span class="panel-section-label">Materials</span>
           </div>
           <div class="panel-section-content panel-controls-stack">
+            <label class="control">
+              <div class="control-row">
+                <span>Gradient Type</span>
+              </div>
+              <select id="gradient-type">
+                <option value="displacement" selected>Displacement</option>
+                <option value="curvature">Curvature</option>
+              </select>
+            </label>
+
             <div class="control control-grid-2">
               <label class="control compact">
                 <div class="control-row">

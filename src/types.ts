@@ -1,5 +1,6 @@
 export type BaseShape = 'cube' | 'sphere' | 'torus';
 export type ViewMode = 'curvature' | 'mask';
+export type GradientType = 'curvature' | 'displacement';
 
 export type SimulationSettings = {
   growthSpeed: number;
@@ -9,6 +10,7 @@ export type SimulationSettings = {
 export type ShapeSettings = {
   baseShape: BaseShape;
   subdivision: number;
+  showWireframe: boolean;
   brushRadius: number;
   falloffOffset: number;
   blurMaskStrength: number;
@@ -25,6 +27,7 @@ export type GrowthSettings = {
 };
 
 export type MaterialSettings = {
+  gradientType: GradientType;
   gradientStart: string;
   gradientEnd: string;
   curvatureContrast: number;

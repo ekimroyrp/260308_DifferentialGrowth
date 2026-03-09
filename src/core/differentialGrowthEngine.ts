@@ -6,6 +6,8 @@ import { SeededRng } from './seededRng';
 
 const tempAverage = new Vector3();
 const tempEdge = new Vector3();
+const CURVATURE_BLUR_PASSES = 2;
+const CURVATURE_BLUR_STRENGTH = 0.34;
 
 export class DifferentialGrowthEngine {
   private geometry: BufferGeometry;
@@ -14,6 +16,7 @@ export class DifferentialGrowthEngine {
   private normalAttr: BufferAttribute;
   private maskAttr: BufferAttribute;
   private curvatureAttr: BufferAttribute;
+  private displacementAttr: BufferAttribute;
   private readonly settings: GrowthSettings;
   private basePositions: Float32Array;
   private curvatureWork: Float32Array;
@@ -28,6 +31,7 @@ export class DifferentialGrowthEngine {
     this.normalAttr = this.geometry.getAttribute('normal') as BufferAttribute;
     this.maskAttr = new BufferAttribute(new Float32Array(this.positionAttr.count), 1);
     this.curvatureAttr = new BufferAttribute(new Float32Array(this.positionAttr.count), 1);
+    this.displacementAttr = new BufferAttribute(new Float32Array(this.positionAttr.count), 1);
     this.topology = { adjacency: [], edges: [] };
     this.basePositions = new Float32Array();
     this.curvatureWork = new Float32Array();
@@ -53,8 +57,11 @@ export class DifferentialGrowthEngine {
     this.maskAttr.setUsage(DynamicDrawUsage);
     this.curvatureAttr = new BufferAttribute(new Float32Array(this.positionAttr.count), 1);
     this.curvatureAttr.setUsage(DynamicDrawUsage);
+    this.displacementAttr = new BufferAttribute(new Float32Array(this.positionAttr.count), 1);
+    this.displacementAttr.setUsage(DynamicDrawUsage);
     this.geometry.setAttribute('aMask', this.maskAttr);
     this.geometry.setAttribute('aCurvature', this.curvatureAttr);
+    this.geometry.setAttribute('aDisplacement', this.displacementAttr);
 
     this.topology = buildTopology(this.geometry);
     this.basePositions = Float32Array.from(this.positionAttr.array as ArrayLike<number>);
@@ -632,6 +639,7 @@ export class DifferentialGrowthEngine {
     (this.maskAttr.array as Float32Array).set(maskArray);
     this.maskAttr.needsUpdate = true;
     this.basePositions = baseArray;
+    this.updateCurvatureAttribute();
 
     source.dispose();
     if (source !== sourceClone) {
@@ -644,9 +652,11 @@ export class DifferentialGrowthEngine {
     const positionArray = this.positionAttr.array as Float32Array;
     const normalArray = this.normalAttr.array as Float32Array;
     const curvatureArray = this.curvatureAttr.array as Float32Array;
+    const displacementArray = this.displacementAttr.array as Float32Array;
     const adjacency = this.topology.adjacency;
     let minCurvature = Number.POSITIVE_INFINITY;
     let maxCurvature = Number.NEGATIVE_INFINITY;
+    let maxDisplacement = 0;
 
     for (let i = 0; i < curvatureArray.length; i += 1) {
       const neighbors = adjacency[i];
@@ -693,6 +703,65 @@ export class DifferentialGrowthEngine {
     for (let i = 0; i < curvatureArray.length; i += 1) {
       curvatureArray[i] = MathUtils.clamp((curvatureArray[i] - minCurvature) * invSpan, 0, 1);
     }
+
+    // Blend curvature locally so gradient transitions are smoother across neighboring vertices.
+    if (CURVATURE_BLUR_PASSES > 0 && CURVATURE_BLUR_STRENGTH > 0) {
+      const blurWork = this.curvatureWork;
+      for (let pass = 0; pass < CURVATURE_BLUR_PASSES; pass += 1) {
+        for (let i = 0; i < curvatureArray.length; i += 1) {
+          const neighbors = adjacency[i];
+          if (!neighbors || neighbors.length === 0) {
+            blurWork[i] = curvatureArray[i];
+            continue;
+          }
+          let sum = 0;
+          for (let j = 0; j < neighbors.length; j += 1) {
+            sum += curvatureArray[neighbors[j]];
+          }
+          const average = sum / neighbors.length;
+          blurWork[i] = MathUtils.lerp(curvatureArray[i], average, CURVATURE_BLUR_STRENGTH);
+        }
+        curvatureArray.set(blurWork);
+      }
+
+      let postBlurMin = Number.POSITIVE_INFINITY;
+      let postBlurMax = Number.NEGATIVE_INFINITY;
+      for (let i = 0; i < curvatureArray.length; i += 1) {
+        const value = curvatureArray[i];
+        if (value < postBlurMin) {
+          postBlurMin = value;
+        }
+        if (value > postBlurMax) {
+          postBlurMax = value;
+        }
+      }
+      const postSpan = Math.max(postBlurMax - postBlurMin, 1e-6);
+      const invPostSpan = 1 / postSpan;
+      for (let i = 0; i < curvatureArray.length; i += 1) {
+        curvatureArray[i] = MathUtils.clamp((curvatureArray[i] - postBlurMin) * invPostSpan, 0, 1);
+      }
+    }
+
+    for (let i = 0; i < curvatureArray.length; i += 1) {
+      const index = i * 3;
+      const dx = positionArray[index] - this.basePositions[index];
+      const dy = positionArray[index + 1] - this.basePositions[index + 1];
+      const dz = positionArray[index + 2] - this.basePositions[index + 2];
+      const displacement = Math.sqrt(dx * dx + dy * dy + dz * dz);
+      displacementArray[i] = displacement;
+      if (displacement > maxDisplacement) {
+        maxDisplacement = displacement;
+      }
+    }
+    if (maxDisplacement > 1e-8) {
+      const invMaxDisplacement = 1 / maxDisplacement;
+      for (let i = 0; i < displacementArray.length; i += 1) {
+        displacementArray[i] = MathUtils.clamp(displacementArray[i] * invMaxDisplacement, 0, 1);
+      }
+    } else {
+      displacementArray.fill(0);
+    }
     this.curvatureAttr.needsUpdate = true;
+    this.displacementAttr.needsUpdate = true;
   }
 }

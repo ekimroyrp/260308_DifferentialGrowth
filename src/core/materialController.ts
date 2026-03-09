@@ -9,6 +9,7 @@ export class MaterialController {
       uniforms: {
         uGradientStart: { value: new Color(settings.gradientStart) },
         uGradientEnd: { value: new Color(settings.gradientEnd) },
+        uGradientType: { value: settings.gradientType === 'displacement' ? 1.0 : 0.0 },
         uCurvatureContrast: { value: settings.curvatureContrast },
         uCurvatureBias: { value: settings.curvatureBias },
         uFresnel: { value: settings.fresnel },
@@ -20,11 +21,13 @@ export class MaterialController {
       vertexShader: `
         attribute float aCurvature;
         attribute float aMask;
+        attribute float aDisplacement;
 
         varying vec3 vWorldPos;
         varying vec3 vNormal;
         varying float vCurvature;
         varying float vMask;
+        varying float vDisplacement;
 
         void main() {
           vec4 worldPos = modelMatrix * vec4(position, 1.0);
@@ -32,6 +35,7 @@ export class MaterialController {
           vNormal = normalize(normalMatrix * normal);
           vCurvature = aCurvature;
           vMask = aMask;
+          vDisplacement = aDisplacement;
           gl_Position = projectionMatrix * viewMatrix * worldPos;
         }
       `,
@@ -42,9 +46,11 @@ export class MaterialController {
         varying vec3 vNormal;
         varying float vCurvature;
         varying float vMask;
+        varying float vDisplacement;
 
         uniform vec3 uGradientStart;
         uniform vec3 uGradientEnd;
+        uniform float uGradientType;
         uniform float uCurvatureContrast;
         uniform float uCurvatureBias;
         uniform float uFresnel;
@@ -66,7 +72,11 @@ export class MaterialController {
           vec3 lightB = normalize(uLightDirB);
 
           float curvature = clamp(vCurvature * uCurvatureContrast + uCurvatureBias, 0.0, 1.0);
-          vec3 baseColor = mix(uGradientStart, uGradientEnd, curvature);
+          float curvedCurvature = pow(curvature, 1.7);
+          float displacement = clamp(vDisplacement, 0.0, 1.0);
+          vec3 curvatureColor = mix(uGradientStart, uGradientEnd, curvedCurvature);
+          vec3 displacementColor = mix(uGradientStart, uGradientEnd, displacement);
+          vec3 baseColor = mix(curvatureColor, displacementColor, step(0.5, uGradientType));
 
           float wrap = 0.32;
           float diffA = max((dot(n, lightA) + wrap) / (1.0 + wrap), 0.0);
@@ -92,6 +102,7 @@ export class MaterialController {
   }
 
   setMaterialSettings(settings: MaterialSettings): void {
+    this.material.uniforms.uGradientType.value = settings.gradientType === 'displacement' ? 1.0 : 0.0;
     this.material.uniforms.uGradientStart.value.set(settings.gradientStart);
     this.material.uniforms.uGradientEnd.value.set(settings.gradientEnd);
     this.material.uniforms.uCurvatureContrast.value = settings.curvatureContrast;

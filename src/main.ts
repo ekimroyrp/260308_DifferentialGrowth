@@ -6,6 +6,7 @@ import {
   Color,
   DynamicDrawUsage,
   MOUSE,
+  MeshBasicMaterial,
   Mesh,
   PerspectiveCamera,
   Raycaster,
@@ -24,7 +25,16 @@ import { FXAAShader } from 'three/examples/jsm/shaders/FXAAShader.js';
 import { DifferentialGrowthEngine } from './core/differentialGrowthEngine';
 import { buildShapeGeometry } from './core/meshFactory';
 import { MaterialController } from './core/materialController';
-import type { AppState, BaseShape, GrowthSettings, MaterialSettings, ShapeSettings, SimulationSettings, ViewMode } from './types';
+import type {
+  AppState,
+  BaseShape,
+  GradientType,
+  GrowthSettings,
+  MaterialSettings,
+  ShapeSettings,
+  SimulationSettings,
+  ViewMode,
+} from './types';
 
 type UiRefs = {
   panel: HTMLDivElement;
@@ -43,6 +53,7 @@ type UiRefs = {
   baseShape: HTMLSelectElement;
   subdivision: HTMLInputElement;
   subdivisionValue: HTMLSpanElement;
+  showWireframe: HTMLInputElement;
   brushRadius: HTMLInputElement;
   brushRadiusValue: HTMLSpanElement;
   falloffOffset: HTMLInputElement;
@@ -63,6 +74,7 @@ type UiRefs = {
   shapeRetentionValue: HTMLSpanElement;
   maxVertices: HTMLInputElement;
   maxVerticesValue: HTMLSpanElement;
+  gradientType: HTMLSelectElement;
   gradientStart: HTMLInputElement;
   gradientEnd: HTMLInputElement;
   curvatureContrast: HTMLInputElement;
@@ -152,6 +164,7 @@ const ui: UiRefs = {
   baseShape: requiredElement('base-shape', isSelect),
   subdivision: requiredElement('subdivision', isInput),
   subdivisionValue: requiredElement('subdivision-value', isSpan),
+  showWireframe: requiredElement('show-wireframe', isInput),
   brushRadius: requiredElement('brush-radius', isInput),
   brushRadiusValue: requiredElement('brush-radius-value', isSpan),
   falloffOffset: requiredElement('falloff-offset', isInput),
@@ -172,6 +185,7 @@ const ui: UiRefs = {
   shapeRetentionValue: requiredElement('shape-retention-value', isSpan),
   maxVertices: requiredElement('max-vertices', isInput),
   maxVerticesValue: requiredElement('max-vertices-value', isSpan),
+  gradientType: requiredElement('gradient-type', isSelect),
   gradientStart: requiredElement('gradient-start-color', isInput),
   gradientEnd: requiredElement('gradient-end-color', isInput),
   curvatureContrast: requiredElement('curvature-contrast', isInput),
@@ -207,6 +221,7 @@ const simulationSettings: SimulationSettings = {
 const shapeSettings: ShapeSettings = {
   baseShape: ui.baseShape.value as BaseShape,
   subdivision: Number.parseInt(ui.subdivision.value, 10),
+  showWireframe: ui.showWireframe.checked,
   brushRadius: Number.parseFloat(ui.brushRadius.value),
   falloffOffset: Number.parseFloat(ui.falloffOffset.value),
   blurMaskStrength: Number.parseFloat(ui.blurMaskStrength.value),
@@ -223,6 +238,7 @@ const growthSettings: GrowthSettings = {
 };
 
 const materialSettings: MaterialSettings = {
+  gradientType: ui.gradientType.value as GradientType,
   gradientStart: ui.gradientStart.value,
   gradientEnd: ui.gradientEnd.value,
   curvatureContrast: Number.parseFloat(ui.curvatureContrast.value),
@@ -270,6 +286,20 @@ const initialGeometry = buildShapeGeometry(shapeSettings.baseShape, shapeSetting
 prepareGeometry(initialGeometry);
 const mesh = new Mesh(initialGeometry, materialController.material);
 scene.add(mesh);
+const wireframeMaterial = new MeshBasicMaterial({
+  color: 0xe6f1ff,
+  wireframe: true,
+  transparent: true,
+  opacity: 0.4,
+  depthWrite: false,
+  polygonOffset: true,
+  polygonOffsetFactor: -1,
+  polygonOffsetUnits: -1,
+});
+const wireframeMesh = new Mesh(initialGeometry, wireframeMaterial);
+wireframeMesh.visible = shapeSettings.showWireframe;
+wireframeMesh.renderOrder = 1;
+scene.add(wireframeMesh);
 
 const engine = new DifferentialGrowthEngine(initialGeometry, growthSettings, simulationSettings.seed);
 
@@ -421,8 +451,10 @@ function enterMaskMode(): void {
 function resetSimulation(): void {
   const nextGeometry = buildShapeGeometry(shapeSettings.baseShape, shapeSettings.subdivision);
   prepareGeometry(nextGeometry);
-  mesh.geometry.dispose();
+  const previousGeometry = mesh.geometry;
   mesh.geometry = nextGeometry;
+  wireframeMesh.geometry = nextGeometry;
+  previousGeometry.dispose();
   engine.setGeometry(nextGeometry);
   engine.reseed(simulationSettings.seed);
   controls.target.set(0, 0, 0);
@@ -581,6 +613,10 @@ ui.gradientEnd.addEventListener('input', () => {
   materialSettings.gradientEnd = ui.gradientEnd.value;
   materialController.setMaterialSettings(materialSettings);
 });
+ui.gradientType.addEventListener('change', () => {
+  materialSettings.gradientType = ui.gradientType.value as GradientType;
+  materialController.setMaterialSettings(materialSettings);
+});
 
 ui.baseShape.addEventListener('change', () => {
   shapeSettings.baseShape = ui.baseShape.value as BaseShape;
@@ -588,6 +624,10 @@ ui.baseShape.addEventListener('change', () => {
 });
 ui.subdivision.addEventListener('change', () => {
   resetSimulation();
+});
+ui.showWireframe.addEventListener('change', () => {
+  shapeSettings.showWireframe = ui.showWireframe.checked;
+  wireframeMesh.visible = shapeSettings.showWireframe;
 });
 
 ui.start.addEventListener('click', () => {
@@ -736,6 +776,7 @@ renderer.setAnimationLoop((now) => {
     if (mesh.geometry !== activeGeometry) {
       const previous = mesh.geometry;
       mesh.geometry = activeGeometry;
+      wireframeMesh.geometry = activeGeometry;
       previous.dispose();
     }
   }

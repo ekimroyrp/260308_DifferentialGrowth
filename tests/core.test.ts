@@ -16,6 +16,7 @@ const growthSettings: GrowthSettings = {
 };
 
 const materialSettings: MaterialSettings = {
+  gradientType: 'curvature',
   gradientStart: '#9fd8ff',
   gradientEnd: '#2e4fb4',
   curvatureContrast: 1.25,
@@ -49,6 +50,21 @@ describe('MeshFactory welding', () => {
 });
 
 describe('DifferentialGrowthEngine mask operations', () => {
+  it('updates normalized displacement attribute based on distance from base shape', () => {
+    const geometry = buildShapeGeometry('sphere');
+    const engine = new DifferentialGrowthEngine(geometry, growthSettings, 321);
+    engine.step(0.02, 1.1);
+
+    const displacementAttr = engine.getGeometry().getAttribute('aDisplacement') as BufferAttribute;
+    const displacement = displacementAttr.array as Float32Array;
+    const max = Math.max(...displacement);
+    const min = Math.min(...displacement);
+
+    expect(max).toBeLessThanOrEqual(1);
+    expect(min).toBeGreaterThanOrEqual(0);
+    expect(max).toBeGreaterThan(0);
+  });
+
   it('paints non-zero mask values and keeps them in [0, 1]', () => {
     const geometry = buildShapeGeometry('sphere');
     const engine = new DifferentialGrowthEngine(geometry, growthSettings, 123);
@@ -207,6 +223,16 @@ describe('MaterialController', () => {
     const controller = new MaterialController(materialSettings);
     controller.setViewMode('mask');
     expect(controller.material.uniforms.uViewMode.value).toBe(1);
+    controller.dispose();
+  });
+
+  it('switches gradient type to displacement', () => {
+    const controller = new MaterialController(materialSettings);
+    controller.setMaterialSettings({
+      ...materialSettings,
+      gradientType: 'displacement',
+    });
+    expect(controller.material.uniforms.uGradientType.value).toBe(1);
     controller.dispose();
   });
 });
