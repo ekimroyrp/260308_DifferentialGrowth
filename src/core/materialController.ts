@@ -1,4 +1,4 @@
-import { Color, ShaderMaterial, Vector3 } from 'three';
+import { Color, DoubleSide, ShaderMaterial, Vector3 } from 'three';
 import type { MaterialSettings, ViewMode } from '../types';
 
 export class MaterialController {
@@ -6,6 +6,7 @@ export class MaterialController {
 
   constructor(settings: MaterialSettings) {
     this.material = new ShaderMaterial({
+      side: DoubleSide,
       uniforms: {
         uGradientStart: { value: new Color(settings.gradientStart) },
         uGradientEnd: { value: new Color(settings.gradientEnd) },
